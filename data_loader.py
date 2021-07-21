@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
+from tensorflow.keras.layers.experimental import preprocessing
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 
 from pathlib import Path
@@ -18,10 +19,15 @@ class DataModule():
     self.batch_size = batch_size
     self.dataset = None
     self.random_seed = random_seed if random_seed != 0 else np.random.randint(1)
+    self.output_text_processor = preprocessing.TextVectorization(
+      standardize=text_lower_and_start_end,
+    )
 
     self.setup()
 
   def setup(self):
+    self.output_text_processor.adapt(['A C G T'])
+
     raw_aligned_data, bases_sequence = self._load_simulator_data(self.dir)
     raw_data, bases_data = zip(*self.samples_generator(raw_aligned_data, bases_sequence, self.max_raw_length, self.bases_offset))
 
@@ -30,7 +36,7 @@ class DataModule():
     print("MAX LEN", len(max(bases_prep)))
 
     self.dataset = tf.data.Dataset.from_tensor_slices((raw_prep, bases_prep)).shuffle(len(raw_prep), seed=self.random_seed)
-    self.dataset = self.dataset.batch(self.batch_size)
+    self.dataset = self.dataset.batch(self.batch_size, drop_remainder=True)
 
   def prepare_raw_data_for_dataset(self, raw_data):
     raw_prep = pad_sequences(raw_data, self.max_raw_length, dtype='float32', padding='post', value=INPUT_MASK)
@@ -42,17 +48,6 @@ class DataModule():
   def prepare_bases_data_for_dataset(self, bases_data):
     bases_prep = [' '.join(bases_sample) for bases_sample in bases_data]
     return bases_prep
-
-#   def text_lower_and_start_end(seq):
-#     seq = tf.strings.lower(seq)
-#     seq = tf.strings.join(['[START]', seq, '[END]'], separator=' ')
-#     return seq
-
-# output_text_processor = preprocessing.TextVectorization(
-#     standardize=tf_lower_and_start_end
-#     # vocabulary=['', '[UNK]', '[START]', '[END]', 'a', 'c', 'g', 't']
-# )
-# output_text_processor.adapt(['A C G T'])
 
   def samples_generator(self, raw_aligned_data, bases_sequence, max_raw_length, bases_offset):
     for i in range(0, len(bases_sequence) - bases_offset + 1, bases_offset):
@@ -140,3 +135,8 @@ class DataModule():
     raw_signal_data = minmax_scale(raw_signal_data)
 
     return self._get_bases_raw_aligned_data(alignment_data, raw_signal_data), bases_sequence
+
+def text_lower_and_start_end(text):
+  text = tf.strings.lower(text)
+  text = tf.strings.join(['[START]', text, '[END]'], separator=' ')
+  return text
