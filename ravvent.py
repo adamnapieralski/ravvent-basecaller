@@ -26,13 +26,13 @@ if __name__ == '__main__':
     print(example_target_batch)
     break
 
-  translator = TrainTranslator(
+  train_basecaller = TrainBasecaller(
       units, embedding_dim,
       output_text_processor=dm.output_text_processor,
       use_tf_function=True)
 
   # Configure the loss and optimizer
-  translator.compile(
+  train_basecaller.compile(
       optimizer=tf.optimizers.Adam(),
       loss=MaskedLoss(),
   )
@@ -46,7 +46,7 @@ if __name__ == '__main__':
   #   mode='min',
   #   save_best_only=True)
 
-  hist = translator.fit(dataset, epochs=3, callbacks=[batch_loss], validation_data=val_dataset)
+  hist = train_basecaller.fit(dataset, epochs=3, callbacks=[batch_loss], validation_data=val_dataset)
   print(hist.history)
 
   # raw_data, nucleotides = dl._load_simulator_data('data/seq_1/perfect')
