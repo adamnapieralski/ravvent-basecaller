@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.ops.random_ops import categorical
 
 from shape_checker import ShapeChecker
 
@@ -8,6 +9,10 @@ from typing import Any, Tuple
 
 BATCH_SIZE = 32
 INPUT_MAX_LEN = 300
+
+RANDOM_SEED = 22
+
+tf.random.set_seed(RANDOM_SEED)
 
 class Encoder(tf.keras.layers.Layer):
     def __init__(self, enc_units):
@@ -63,7 +68,6 @@ class BahdanauAttention(tf.keras.layers.Layer):
 
         query_mask = tf.ones(tf.shape(query)[:-1], dtype=bool)
         value_mask = mask
-        print(w1_query.shape, value.shape, w2_key.shape, query_mask.shape, value_mask.shape)
         context_vector, attention_weights = self.attention(
             inputs = [w1_query, value, w2_key],
             mask=[query_mask, value_mask],
@@ -195,6 +199,9 @@ class TrainTranslator(tf.keras.Model):
         else:
             return self._train_step(inputs)
 
+    def test_step(self, inputs):
+        return self._tf_test_step(inputs)
+
     def _preprocess(self, input_sequence, target_sequence):
         # self.shape_checker(input_sequence, ('batch',))
         self.shape_checker(target_sequence, ('batch',))
@@ -235,6 +242,9 @@ class TrainTranslator(tf.keras.Model):
                 # 1. The current input to the decoder.
                 # 2. The target the target for the decoder's next prediction.
                 new_tokens = target_tokens[:, t:t+2]
+                # input_tokens = target_tokens[:, t:t+1]
+                # target_pred_tokens = target_tokens[: t+1:t+2]
+                # new_tokens = target_tokens[:, t:t+2]
                 # print(new_tokens, enc_output, dec_state)
                 step_loss, dec_state = self._loop_step(new_tokens, input_mask, enc_output, dec_state)
                 loss = loss + step_loss
@@ -268,12 +278,59 @@ class TrainTranslator(tf.keras.Model):
         y_pred = dec_result.logits
         step_loss = self.loss(y, y_pred)
 
+        # pred_tokens = None
+
+        # if return_prediction_tokens:
+        # pred_tokens = self._sample_prediction(dec_result.logits, 1.0)
+
         return step_loss, dec_state
 
     @tf.function(input_signature=[[tf.TensorSpec(dtype=tf.float32, shape=[BATCH_SIZE, INPUT_MAX_LEN]),
                                     tf.TensorSpec(dtype=tf.string, shape=[None])]])
     def _tf_train_step(self, inputs):
         return self._train_step(inputs)
+
+    def _test_step(self, data):
+        input_sequence, target_sequence = data
+
+        (input_sequence, input_mask, target_tokens, target_mask) = self._preprocess(input_sequence, target_sequence)
+        max_target_length = tf.shape(target_tokens)[1]
+
+        enc_output, enc_state = self.encoder(input_sequence)
+
+        dec_state = enc_state
+        val_loss = tf.constant(0.0)
+
+        # input_tokens = target_tokens[:, 0:1] # [START] tokens
+
+        for t in tf.range(max_target_length-1):
+            input_tokens = target_tokens[:, t:t+2] # teacher forcing
+
+            # target_pred_tokens = target_tokens[:, t+1:t+2]
+
+            step_loss, dec_state = self._loop_step(input_tokens, input_mask, enc_output, dec_state)
+            val_loss += step_loss
+
+        # Average the loss over all non padding tokens.
+        average_loss = val_loss / tf.reduce_sum(tf.cast(target_mask, tf.float32))
+
+
+        return {'batch_loss': average_loss}
+
+    @tf.function(input_signature=[[tf.TensorSpec(dtype=tf.float32, shape=[BATCH_SIZE, INPUT_MAX_LEN]),
+                                tf.TensorSpec(dtype=tf.string, shape=[None])]])
+    def _tf_test_step(self, inputs):
+        return self._test_step(inputs)
+
+    # def _sample_prediction(self, logits, temperature):
+    #     if temperature == 0.0:
+    #         pred_tokens = tf.argmax(logits, axis=-1)
+    #     else:
+    #         logits = tf.squeeze(logits, axis=1)
+    #         pred_tokens = tf.random.categorical(logits / temperature, num_samples=1)
+
+    #     return pred_tokens
+
 
 
 class BatchLogs(tf.keras.callbacks.Callback):
