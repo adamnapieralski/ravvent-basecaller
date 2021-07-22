@@ -51,13 +51,13 @@ if __name__ == '__main__':
 
   # raw_data, nucleotides = dl._load_simulator_data('data/seq_1/perfect')
 
-  # bc = Basecaller(
-  #   encoder=translator.encoder,
-  #   decoder=translator.decoder,
-  #   output_text_processor=dm.output_text_processor,
-  # )
+  bc = Basecaller(
+    encoder=train_basecaller.encoder,
+    decoder=train_basecaller.decoder,
+    output_text_processor=dm.output_text_processor,
+  )
 
-  # out = bc.tf_translate(
+  # out = bc.tf_basecall_batch(
   #   raw_input=example_input_batch,
   # )
 
@@ -66,3 +66,5 @@ if __name__ == '__main__':
   #   maxval=dm.output_text_processor.vocabulary_size())
   # out = bc.tokens_to_bases_sequence(example_output_tokens).numpy()
   # print(out)
+  acc = bc.evaluate_batch((example_input_batch, example_target_batch))
+  print(acc)

@@ -27,6 +27,7 @@ class Basecaller:
 
         self.start_token = index_from_string('[START]')
         self.end_token = index_from_string('[END]')
+        self.padding_token = index_from_string('')
 
 
     def tokens_to_bases_sequence(self, result_tokens):
@@ -66,13 +67,7 @@ class Basecaller:
 
         return new_tokens
 
-
-    def translate_symbolic(self,
-                        raw_input,
-                        *,
-                        max_length=50,
-                        return_attention=True,
-                        temperature=1.0):
+    def basecall_batch_to_tokens(self, raw_input, *, max_length=100, temperature=1.0, early_break=True):
         shape_checker = ShapeChecker()
 
         batch_size = tf.shape(raw_input)[0]
@@ -95,7 +90,10 @@ class Basecaller:
         done = tf.zeros([batch_size, 1], dtype=tf.bool)
         shape_checker(done, ('batch', 't1'))
 
-        for t in tf.range(max_length):
+        # write start tokens at the beginning
+        result_tokens = result_tokens.write(0, new_tokens)
+
+        for t in tf.range(1, max_length, 1):
             dec_input = DecoderInput(
                 new_tokens=new_tokens, enc_output=enc_output, mask=(raw_input != -1))
 
@@ -108,41 +106,78 @@ class Basecaller:
             shape_checker(dec_result.logits, ('batch', 't1', 'vocab'))
             shape_checker(new_tokens, ('batch', 't1'))
 
-            # If a sequence produces an `end_token`, set it `done`
-            done = done | (new_tokens == self.end_token)
             # Once a sequence is done it only produces 0-padding.
             new_tokens = tf.where(done, tf.constant(0, dtype=tf.int64), new_tokens)
+            # If a sequence produces an `end_token`, set it `done`
+            done = done | (new_tokens == self.end_token)
 
             # Collect the generated tokens
             result_tokens = result_tokens.write(t, new_tokens)
 
-            if tf.reduce_all(done):
+            if early_break and tf.reduce_all(done):
                 break
 
-        # Convert the list of generated token ids to a list of strings.
         result_tokens = result_tokens.stack()
         shape_checker(result_tokens, ('t', 'batch', 't0'))
         result_tokens = tf.squeeze(result_tokens, -1)
         result_tokens = tf.transpose(result_tokens, [1, 0])
         shape_checker(result_tokens, ('batch', 't'))
 
-        result_base_sequence = self.tokens_to_bases_sequence(result_tokens)
-        shape_checker(result_base_sequence, ('batch',))
+        attention_stack = attention.stack()
+        shape_checker(attention_stack, ('t', 'batch', 't1', 's'))
 
-        if return_attention:
-            attention_stack = attention.stack()
-            shape_checker(attention_stack, ('t', 'batch', 't1', 's'))
+        attention_stack = tf.squeeze(attention_stack, 2)
+        shape_checker(attention_stack, ('t', 'batch', 's'))
 
-            attention_stack = tf.squeeze(attention_stack, 2)
-            shape_checker(attention_stack, ('t', 'batch', 's'))
+        attention_stack = tf.transpose(attention_stack, [1, 0, 2])
+        shape_checker(attention_stack, ('batch', 't', 's'))
 
-            attention_stack = tf.transpose(attention_stack, [1, 0, 2])
-            shape_checker(attention_stack, ('batch', 't', 's'))
+        return {'token_sequences': result_tokens, 'attention': attention_stack}
 
-            return {'base_sequence': result_base_sequence, 'attention': attention_stack}
-        else:
-            return {'base_sequence': result_base_sequence}
+    @tf.function(input_signature=[
+        tf.TensorSpec(dtype=tf.float32, shape=[BATCH_SIZE, INPUT_MAX_LEN]),
+        tf.TensorSpec(dtype=tf.int32, shape=()),
+        tf.TensorSpec(dtype=tf.bool, shape=())])
+    def tf_basecall_batch_to_tokens(self, raw_input, max_length=100, early_break=True):
+        return self.basecall_batch_to_tokens(raw_input, max_length=max_length, early_break=early_break)
 
-    @tf.function(input_signature=[tf.TensorSpec(dtype=tf.float32, shape=[BATCH_SIZE, INPUT_MAX_LEN]), tf.TensorSpec(dtype=tf.int32, shape=())])
-    def tf_translate(self, raw_input, max_length=100):
-        return self.translate_symbolic(raw_input, max_length=max_length)
+
+    def basecall_batch(self,
+                        raw_input,
+                        *,
+                        max_length=100,
+                        return_attention=True,
+                        temperature=1.0):
+        shape_checker = ShapeChecker()
+
+        basecall_tokens_res = self.tf_basecall_batch_to_tokens(raw_input, max_length=max_length)
+        token_sequences = basecall_tokens_res['token_sequences']
+        result_base_sequences = self.tokens_to_bases_sequence(token_sequences)
+        shape_checker(result_base_sequences, ('batch',))
+
+        return {'base_sequences': result_base_sequences, 'attention': basecall_tokens_res['attention']}
+
+    @tf.function(input_signature=[
+        tf.TensorSpec(dtype=tf.float32, shape=[BATCH_SIZE, INPUT_MAX_LEN]),
+        tf.TensorSpec(dtype=tf.int32, shape=())])
+    def tf_basecall_batch(self, raw_input, max_length=100):
+        return self.basecall_batch(raw_input, max_length=max_length)
+
+    def evaluate_batch(self, data):
+        input_sequence, target_sequence = data
+
+        target_token_sequences = self.output_text_processor(target_sequence)
+
+        max_target_length = tf.shape(target_token_sequences)[1]
+        translate_res = self.tf_basecall_batch_to_tokens(input_sequence, max_length=max_target_length, early_break=False)
+        pred_token_sequences = translate_res['token_sequences']
+
+        return self.masked_accuracy(target_token_sequences, pred_token_sequences)
+
+    def masked_accuracy(self, y_true, y_pred):
+        match = tf.cast(y_true == y_pred, tf.int32)
+        mask = tf.cast(y_true != self.padding_token | self.start_token | self.end_token, tf.int32)
+
+        total = tf.reduce_sum(mask)
+        count = tf.reduce_sum(mask * match)
+        return count / total
