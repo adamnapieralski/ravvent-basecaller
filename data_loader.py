@@ -38,6 +38,21 @@ class DataModule():
     self.dataset = tf.data.Dataset.from_tensor_slices((raw_prep, bases_prep)).shuffle(len(raw_prep), seed=self.random_seed)
     self.dataset = self.dataset.batch(self.batch_size, drop_remainder=True)
 
+  def get_train_val_test_split_datasets(self, val_split=0.1, test_split=0.1):
+    dataset_sz = tf.data.experimental.cardinality(self.dataset).numpy()
+    train_split = 1 - val_split - test_split
+
+    train_sz = int(train_split * dataset_sz)
+    val_sz = int(val_split * dataset_sz)
+
+    train_ds = self.dataset.take(train_sz)
+    remaining_ds = self.dataset.skip(train_sz)
+
+    val_ds = remaining_ds.take(val_sz)
+    test_ds = remaining_ds.skip(val_sz)
+
+    return train_ds, val_ds, test_ds
+
   def prepare_raw_data_for_dataset(self, raw_data):
     raw_prep = pad_sequences(raw_data, self.max_raw_length, dtype='float32', padding='post', value=INPUT_MASK)
     # raw_prep = np.reshape(raw_prep, (len(raw_prep), self.max_raw_length, 1))

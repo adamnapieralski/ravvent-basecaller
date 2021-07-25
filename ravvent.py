@@ -2,69 +2,58 @@ from enc_dec_attn import *
 from data_loader import DataModule
 from basecaller import Basecaller
 
+EMBEDDING_DIM = 1
+UNITS = 16
+
 
 if __name__ == '__main__':
-  # inp = [[1.,2.,3.,4.], [2.,3.,1.,4.], [4.,4.,2.,1.], [3.,1.,4.,1.], [3.,1.,4.,1.]]
-  # targ = ['a c g t', 'g t c a', 'a g a g', 'g t a c', 't t t a']
+    dm = DataModule('data/seq_2_5k/perfect', INPUT_MAX_LEN, 1, BATCH_SIZE)
 
-  # dataset = tf.data.Dataset.from_tensor_slices((inp, targ)).shuffle(len(inp))
-  # dataset = dataset.batch(BATCH_SIZE)
+    train_ds, val_ds, test_ds = dm.get_train_val_test_split_datasets()
 
-  dm = DataModule('data/seq_2_5k/perfect', INPUT_MAX_LEN, 1, BATCH_SIZE)
-  dataset = dm.dataset
-  print(dataset)
+    for example_input_batch, example_target_batch in train_ds.take(1):
+        print(example_input_batch)
+        print()
+        print(example_target_batch)
+        break
 
-  dm_val = DataModule('data/seq_1/perfect', INPUT_MAX_LEN, 1, BATCH_SIZE)
-  val_dataset = dm_val.dataset
+    train_basecaller = TrainBasecaller(
+        UNITS, EMBEDDING_DIM,
+        output_text_processor=dm.output_text_processor,
+        use_tf_function=True)
 
-  embedding_dim = 1
-  units = 16
+    # Configure the loss and optimizer
+    train_basecaller.compile(
+        optimizer=tf.optimizers.Adam(),
+        loss=MaskedLoss(),
+    )
+    batch_loss = BatchLogs('batch_loss')
 
-  for example_input_batch, example_target_batch in dataset.take(1):
-    print(example_input_batch)
-    print()
-    print(example_target_batch)
-    break
+    checkpoint_filepath = 'models/chp'
+    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+        filepath=checkpoint_filepath,
+        save_weights_only=True,
+        monitor='val_batch_loss',
+        mode='min',
+        save_best_only=True
+    )
 
-  train_basecaller = TrainBasecaller(
-      units, embedding_dim,
-      output_text_processor=dm.output_text_processor,
-      use_tf_function=True)
+    early_stopping_callback = tf.keras.callbacks.EarlyStopping(
+        monitor='val_batch_loss',
+        patience=1,
+        restore_best_weights=True,
+        mode='min',
+        verbose=1
+    )
 
-  # Configure the loss and optimizer
-  train_basecaller.compile(
-      optimizer=tf.optimizers.Adam(),
-      loss=MaskedLoss(),
-  )
-  batch_loss = BatchLogs('batch_loss')
+    hist = train_basecaller.fit(train_ds, epochs=5, callbacks=[batch_loss, model_checkpoint_callback, early_stopping_callback], validation_data=val_ds)
+    print(hist.history)
 
-  # checkpoint_filepath = 'models/chp'
-  # model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-  #   filepath=checkpoint_filepath,
-  #   save_weights_only=True,
-  #   monitor='batch_loss',
-  #   mode='min',
-  #   save_best_only=True)
+    bc = Basecaller(
+        encoder=train_basecaller.encoder,
+        decoder=train_basecaller.decoder,
+        output_text_processor=dm.output_text_processor
+    )
 
-  hist = train_basecaller.fit(dataset, epochs=3, callbacks=[batch_loss], validation_data=val_dataset)
-  print(hist.history)
-
-  # raw_data, nucleotides = dl._load_simulator_data('data/seq_1/perfect')
-
-  bc = Basecaller(
-    encoder=train_basecaller.encoder,
-    decoder=train_basecaller.decoder,
-    output_text_processor=dm.output_text_processor,
-  )
-
-  # out = bc.tf_basecall_batch(
-  #   raw_input=example_input_batch,
-  # )
-
-  # example_output_tokens = tf.random.uniform(
-  #   shape=[5, 2], minval=0, dtype=tf.int64,
-  #   maxval=dm.output_text_processor.vocabulary_size())
-  # out = bc.tokens_to_bases_sequence(example_output_tokens).numpy()
-  # print(out)
-  acc = bc.evaluate_batch((example_input_batch, example_target_batch))
-  print(acc)
+    acc = bc.evaluate_batch((example_input_batch, example_target_batch))
+    print(acc)

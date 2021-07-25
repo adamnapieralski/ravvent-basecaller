@@ -1,7 +1,9 @@
 import numpy as np
 import tensorflow as tf
 from shape_checker import ShapeChecker
-from enc_dec_attn import DecoderInput, BATCH_SIZE, INPUT_MAX_LEN
+from enc_dec_attn import DecoderInput, BATCH_SIZE, INPUT_MAX_LEN, RANDOM_SEED
+
+tf.random.set_seed(RANDOM_SEED)
 
 class Basecaller:
     def __init__(self, encoder, decoder, output_text_processor) -> None:
