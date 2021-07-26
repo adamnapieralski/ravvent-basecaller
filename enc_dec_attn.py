@@ -1,4 +1,3 @@
-import numpy as np
 import tensorflow as tf
 from tensorflow.python.ops.random_ops import categorical
 
@@ -7,8 +6,8 @@ from shape_checker import ShapeChecker
 import typing
 from typing import Any, Tuple
 
-BATCH_SIZE = 32
-INPUT_MAX_LEN = 300
+BATCH_SIZE = 64
+INPUT_MAX_LEN = 150
 
 RANDOM_SEED = 22
 

@@ -1,16 +1,21 @@
+import numpy as np
 from enc_dec_attn import *
 from data_loader import DataModule
 from basecaller import Basecaller
-import pickle
+import json
 
 EMBEDDING_DIM = 1
-UNITS = 16
-EPOCHS = 4
-DATA_PATH = 'data/seq_2_5k/perfect'
+UNITS = 32
+EPOCHS = 100
+PATIENCE = 50
+DATA_PATH = 'data/sim_out.dep.CM000663.l200000.s0'
+BASES_OFFSET = 1
+
+NAME_SPEC = f'raw.u{UNITS}.inmax{INPUT_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}'
 
 
 if __name__ == '__main__':
-    dm = DataModule(DATA_PATH, INPUT_MAX_LEN, 4, BATCH_SIZE)
+    dm = DataModule(DATA_PATH, INPUT_MAX_LEN, BASES_OFFSET, BATCH_SIZE)
 
     train_ds, val_ds, test_ds = dm.get_train_val_test_split_datasets()
 
@@ -30,7 +35,7 @@ if __name__ == '__main__':
     )
     batch_loss = BatchLogs('batch_loss')
 
-    checkpoint_filepath = 'models/chp'
+    checkpoint_filepath = f'models/model.{NAME_SPEC}/model_chp'
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_filepath,
         save_weights_only=True,
@@ -41,7 +46,7 @@ if __name__ == '__main__':
 
     early_stopping_callback = tf.keras.callbacks.EarlyStopping(
         monitor='val_batch_loss',
-        patience=1,
+        patience=PATIENCE,
         restore_best_weights=True,
         mode='min',
         verbose=1
@@ -50,8 +55,8 @@ if __name__ == '__main__':
     hist = train_basecaller.fit(train_ds, epochs=EPOCHS, callbacks=[batch_loss, model_checkpoint_callback, early_stopping_callback], validation_data=val_ds)
     print(hist.history)
 
-    with open('train_history.pickle', 'wb') as hf:
-        pickle.dump(hist.history, hf, pickle.HIGHEST_PROTOCOL)
+    info = {}
+    info['train_history'] = hist.history
 
     bc = Basecaller(
         encoder=train_basecaller.encoder,
@@ -67,5 +72,8 @@ if __name__ == '__main__':
     test_accuracy = np.mean(accuracies)
     print(test_accuracy)
 
-    with open('accuracy.pickle', 'wb') as af:
-        pickle.dump(test_accuracy, af, pickle.HIGHEST_PROTOCOL)
+    info['test_accuracy'] = test_accuracy
+
+    with open(f'info/info.{NAME_SPEC}.json', 'w') as info_file:
+        json.dump(info, info_file)
+
