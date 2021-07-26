@@ -6,6 +6,8 @@ from shape_checker import ShapeChecker
 import typing
 from typing import Any, Tuple
 
+import utils
+
 BATCH_SIZE = 64
 INPUT_MAX_LEN = 150
 
@@ -190,6 +192,13 @@ class TrainBasecaller(tf.keras.Model):
         self.use_tf_function = use_tf_function
         self.shape_checker = ShapeChecker()
 
+        index_from_string = tf.keras.layers.experimental.preprocessing.StringLookup(
+            vocabulary=output_text_processor.get_vocabulary(), mask_token=''
+        )
+        self.start_token = index_from_string('[START]')
+        self.end_token = index_from_string('[END]')
+        self.padding_token = index_from_string('')
+
     def train_step(self, inputs):
         if self.use_tf_function:
             return self._tf_train_step(inputs)
@@ -296,6 +305,11 @@ class TrainBasecaller(tf.keras.Model):
 
         input_tokens = target_tokens[:, 0:1] # [START] tokens
 
+        # for accuracy measurement, as in Basecaller
+        result_tokens = tf.TensorArray(tf.int64, size=1, dynamic_size=True)
+        done = tf.zeros([BATCH_SIZE, 1], dtype=tf.bool)
+        result_tokens = result_tokens.write(0, input_tokens)
+
         for t in tf.range(max_target_length-1):
             # input_tokens = target_tokens[:, t:t+2] # teacher forcing
 
@@ -304,11 +318,26 @@ class TrainBasecaller(tf.keras.Model):
             step_loss, dec_state, input_tokens = self._loop_step(input_tokens, target_pred_tokens, input_mask, enc_output, dec_state, return_prediction_tokens=True)
             val_loss += step_loss
 
+            # accuracy
+            new_tokens = tf.where(done, tf.constant(0, dtype=tf.int64), input_tokens)
+            done = done | (new_tokens == self.end_token)
+            result_tokens = result_tokens.write(t+1, new_tokens)
+
         # Average the loss over all non padding tokens.
         average_loss = val_loss / tf.reduce_sum(tf.cast(target_mask, tf.float32))
 
+        # accuracy
+        result_tokens = result_tokens.stack()
+        result_tokens = tf.squeeze(result_tokens, -1)
+        result_tokens = tf.transpose(result_tokens, [1, 0])
 
-        return {'batch_loss': average_loss}
+        accuracy = utils.masked_accuracy(
+            target_tokens,
+            result_tokens,
+            [self.padding_token, self.start_token, self.end_token]
+        )
+
+        return {'batch_loss': average_loss, 'accuracy': accuracy}
 
     @tf.function(input_signature=[[tf.TensorSpec(dtype=tf.float32, shape=[BATCH_SIZE, INPUT_MAX_LEN]),
                                 tf.TensorSpec(dtype=tf.string, shape=[None])]])

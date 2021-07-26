@@ -3,6 +3,8 @@ import tensorflow as tf
 from shape_checker import ShapeChecker
 from enc_dec_attn import DecoderInput, BATCH_SIZE, INPUT_MAX_LEN, RANDOM_SEED
 
+import utils
+
 tf.random.set_seed(RANDOM_SEED)
 
 class Basecaller:
@@ -174,12 +176,9 @@ class Basecaller:
         translate_res = self.tf_basecall_batch_to_tokens(input_sequence, max_length=max_target_length, early_break=False)
         pred_token_sequences = translate_res['token_sequences']
 
-        return self.masked_accuracy(target_token_sequences, pred_token_sequences)
-
-    def masked_accuracy(self, y_true, y_pred):
-        match = tf.cast(y_true == y_pred, tf.int32)
-        mask = tf.cast(y_true != self.padding_token | self.start_token | self.end_token, tf.int32)
-
-        total = tf.reduce_sum(mask)
-        count = tf.reduce_sum(mask * match)
-        return count / total
+        accuracy = utils.masked_accuracy(
+            target_token_sequences,
+            pred_token_sequences,
+            [self.padding_token, self.start_token, self.end_token]
+        )
+        return accuracy
