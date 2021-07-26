@@ -180,7 +180,7 @@ class MaskedLoss(tf.keras.losses.Loss):
         return tf.reduce_sum(loss)
 
 class TrainBasecaller(tf.keras.Model):
-    def __init__(self, units, embedding_dim, output_text_processor, use_tf_function=True):
+    def __init__(self, units, embedding_dim, output_text_processor, teacher_forcing=True, val_teacher_forcing=False, use_tf_function=True):
         super().__init__()
         # Build the encoder and decoder
         encoder = Encoder(units)
@@ -189,6 +189,8 @@ class TrainBasecaller(tf.keras.Model):
         self.encoder = encoder
         self.decoder = decoder
         self.output_text_processor = output_text_processor
+        self.teacher_forcing = teacher_forcing
+        self.val_teacher_forcing = val_teacher_forcing # on validation dataset
         self.use_tf_function = use_tf_function
         self.shape_checker = ShapeChecker()
 
@@ -242,15 +244,23 @@ class TrainBasecaller(tf.keras.Model):
             dec_state = enc_state
             loss = tf.constant(0.0)
 
+            # start tokens
+            input_tokens = target_tokens[:, 0:1]
+            pred_tokens = input_tokens # initialization, not used
+
             for t in tf.range(max_target_length-1):
                 # Pass in two tokens from the target sequence:
                 # 1. The current input to the decoder.
                 # 2. The target the target for the decoder's next prediction.
 
-                input_tokens = target_tokens[:, t:t+1]
+                if self.teacher_forcing:
+                    input_tokens = target_tokens[:, t:t+1]
+                elif t > 0:
+                    input_tokens = pred_tokens
+
                 target_pred_tokens = target_tokens[:, t+1:t+2]
 
-                step_loss, dec_state, _ = self._loop_step(input_tokens, target_pred_tokens, input_mask, enc_output, dec_state)
+                step_loss, dec_state, pred_tokens = self._loop_step(input_tokens, target_pred_tokens, input_mask, enc_output, dec_state)
                 loss = loss + step_loss
 
             # Average the loss over all non padding tokens.
@@ -315,11 +325,18 @@ class TrainBasecaller(tf.keras.Model):
 
             target_pred_tokens = target_tokens[:, t+1:t+2]
 
-            step_loss, dec_state, input_tokens = self._loop_step(input_tokens, target_pred_tokens, input_mask, enc_output, dec_state, return_prediction_tokens=True)
+            if self.val_teacher_forcing:
+                input_tokens = target_tokens[:, t:t+1]
+            else:
+                input_tokens = pred_tokens
+
+            target_pred_tokens = target_tokens[:, t+1:t+2]
+
+            step_loss, dec_state, pred_tokens = self._loop_step(input_tokens, target_pred_tokens, input_mask, enc_output, dec_state, return_prediction_tokens=True)
             val_loss += step_loss
 
             # accuracy
-            new_tokens = tf.where(done, tf.constant(0, dtype=tf.int64), input_tokens)
+            new_tokens = tf.where(done, tf.constant(0, dtype=tf.int64), pred_tokens)
             done = done | (new_tokens == self.end_token)
             result_tokens = result_tokens.write(t+1, new_tokens)
 
