@@ -255,12 +255,12 @@ class TrainBasecaller(tf.keras.Model):
 
                 if self.teacher_forcing:
                     input_tokens = target_tokens[:, t:t+1]
-                elif t > 0:
+                else:
                     input_tokens = pred_tokens
 
                 target_pred_tokens = target_tokens[:, t+1:t+2]
 
-                step_loss, dec_state, pred_tokens = self._loop_step(input_tokens, target_pred_tokens, input_mask, enc_output, dec_state)
+                step_loss, dec_state, pred_tokens = self._loop_step(input_tokens, target_pred_tokens, input_mask, enc_output, dec_state, return_prediction_tokens=True)
                 loss = loss + step_loss
 
             # Average the loss over all non padding tokens.
@@ -314,6 +314,7 @@ class TrainBasecaller(tf.keras.Model):
         val_loss = tf.constant(0.0)
 
         input_tokens = target_tokens[:, 0:1] # [START] tokens
+        pred_tokens = input_tokens
 
         # for accuracy measurement, as in Basecaller
         result_tokens = tf.TensorArray(tf.int64, size=1, dynamic_size=True)
