@@ -12,16 +12,30 @@ from ont_fast5_api.fast5_interface import get_fast5_file
 INPUT_MASK = -1
 
 class DataModule():
-  def __init__(self, dir: str, max_raw_length: int, bases_offset: int, batch_size: int, random_seed: int = 0):
+  def __init__(self, dir: str, max_raw_length: int, bases_offset: int, batch_size: int, data_type: str, random_seed: int = 0):
+    '''Initialize DataModule
+      Parameters:
+        dir (str): output directory of simulator
+        max_raw_length (int):
+        bases_offset (int): Number of bases between following data rows
+        batch_size (int): Number of data rows in batch
+        data_type (str): Data type - allowed values: "raw", "event"
+        random_seed (int): Random seed
+    '''
     self.dir = dir
     self.max_raw_length = max_raw_length
     self.bases_offset= bases_offset
     self.batch_size = batch_size
-    self.dataset = None
+    self.data_type = data_type
     self.random_seed = random_seed if random_seed != 0 else np.random.randint(1)
+    tf.random.set_seed(self.random_seed)
+
+    self.dataset = None
     self.output_text_processor = preprocessing.TextVectorization(
       standardize=text_lower_and_start_end,
     )
+
+    self.input_padding_value = INPUT_MASK
 
     self.setup()
 
@@ -54,10 +68,8 @@ class DataModule():
     return train_ds, val_ds, test_ds
 
   def prepare_raw_data_for_dataset(self, raw_data):
-    raw_prep = pad_sequences(raw_data, self.max_raw_length, dtype='float32', padding='post', value=INPUT_MASK)
-    # raw_prep = np.reshape(raw_prep, (len(raw_prep), self.max_raw_length, 1))
-    # raw_prep = [[val] for seq in raw_prep for val in seq]
-    # print(np.array(raw_prep).shape)
+    raw_prep = pad_sequences(raw_data, self.max_raw_length, dtype='float32', padding='post', value=self.input_padding_value)
+    raw_prep = np.reshape(raw_prep, (len(raw_prep), self.max_raw_length, 1))
     return raw_prep
 
   def prepare_bases_data_for_dataset(self, bases_data):

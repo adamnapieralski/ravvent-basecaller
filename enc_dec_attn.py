@@ -16,9 +16,16 @@ RANDOM_SEED = 22
 tf.random.set_seed(RANDOM_SEED)
 
 class Encoder(tf.keras.layers.Layer):
-    def __init__(self, enc_units):
+    def __init__(self, enc_units: int, data_type: str):
+        '''
+        Initialize encoder
+            Parameters:
+                enc_units (int): Number of encoder inner units (latent dim)
+                data_type (str): Type of encoder regarding input data - allowed values: "raw", "event"
+        '''
         super(Encoder, self).__init__()
         self.enc_units = enc_units
+        self.data_type = data_type
 
         # The GRU RNN layer processes those vectors sequentially.
         self.gru = tf.keras.layers.GRU(self.enc_units,
@@ -29,8 +36,10 @@ class Encoder(tf.keras.layers.Layer):
 
     def call(self, sequence, state=None):
         shape_checker = ShapeChecker()
-        sequence = tf.reshape(sequence, [sequence.shape[0], sequence.shape[1], 1])
-        shape_checker(sequence, ('batch', 's', 1))
+        if self.data_type == 'raw':
+            shape_checker(sequence, ('batch', 's', 1))
+        elif self.data_type == 'event':
+            shape_checker(sequence, ('batch', 's', 3))
 
         # 2. The GRU processes the embedding sequence.
         #    output shape: (batch, s, enc_units)
@@ -180,15 +189,17 @@ class MaskedLoss(tf.keras.losses.Loss):
         return tf.reduce_sum(loss)
 
 class TrainBasecaller(tf.keras.Model):
-    def __init__(self, units, embedding_dim, output_text_processor, teacher_forcing=True, val_teacher_forcing=False, use_tf_function=True):
+    def __init__(self, units: int, embedding_dim: int, output_text_processor, input_data_type: str, input_padding_value, teacher_forcing: bool = True, val_teacher_forcing: bool = False, use_tf_function: bool = True):
         super().__init__()
         # Build the encoder and decoder
-        encoder = Encoder(units)
+        encoder = Encoder(units, input_data_type)
         decoder = Decoder(output_text_processor.vocabulary_size(), embedding_dim, units)
 
         self.encoder = encoder
         self.decoder = decoder
         self.output_text_processor = output_text_processor
+        self.input_data_type = input_data_type
+        self.input_padding_value = input_padding_value
         self.teacher_forcing = teacher_forcing
         self.val_teacher_forcing = val_teacher_forcing # on validation dataset
         self.use_tf_function = use_tf_function
@@ -197,9 +208,9 @@ class TrainBasecaller(tf.keras.Model):
         index_from_string = tf.keras.layers.experimental.preprocessing.StringLookup(
             vocabulary=output_text_processor.get_vocabulary(), mask_token=''
         )
-        self.start_token = index_from_string('[START]')
-        self.end_token = index_from_string('[END]')
-        self.padding_token = index_from_string('')
+        self.output_start_token = index_from_string('[START]')
+        self.output_end_token = index_from_string('[END]')
+        self.output_padding_token = index_from_string('')
 
     def train_step(self, inputs):
         if self.use_tf_function:
@@ -211,16 +222,17 @@ class TrainBasecaller(tf.keras.Model):
         return self._tf_test_step(inputs)
 
     def _preprocess(self, input_sequence, target_sequence):
-        # self.shape_checker(input_sequence, ('batch',))
-        self.shape_checker(target_sequence, ('batch',))
-        input_mask = input_sequence != -1
+        self.shape_checker(input_sequence, ('batch', 's', None))
+        input_mask = utils.input_mask(input_sequence, self.input_padding_value)
+        self.shape_checker(input_mask, ('batch', 's'))
+
         # Convert the text to token IDs
+        self.shape_checker(target_sequence, ('batch',))
         target_tokens = self.output_text_processor(target_sequence)
-        self.shape_checker(input_sequence, ('batch', 's'))
         self.shape_checker(target_tokens, ('batch', 't'))
 
         # Convert IDs to masks.
-        target_mask = target_tokens != 0
+        target_mask = target_tokens != self.output_padding_token
         self.shape_checker(target_mask, ('batch', 't'))
 
         return input_sequence, input_mask, target_tokens, target_mask
@@ -297,8 +309,7 @@ class TrainBasecaller(tf.keras.Model):
 
         return step_loss, dec_state, pred_tokens
 
-    @tf.function(input_signature=[[tf.TensorSpec(dtype=tf.float32, shape=[BATCH_SIZE, INPUT_MAX_LEN]),
-                                    tf.TensorSpec(dtype=tf.string, shape=[None])]])
+    @tf.function
     def _tf_train_step(self, inputs):
         return self._train_step(inputs)
 
@@ -338,7 +349,7 @@ class TrainBasecaller(tf.keras.Model):
 
             # accuracy
             new_tokens = tf.where(done, tf.constant(0, dtype=tf.int64), pred_tokens)
-            done = done | (new_tokens == self.end_token)
+            done = done | (new_tokens == self.output_end_token)
             result_tokens = result_tokens.write(t+1, new_tokens)
 
         # Average the loss over all non padding tokens.
@@ -352,13 +363,12 @@ class TrainBasecaller(tf.keras.Model):
         accuracy = utils.masked_accuracy(
             target_tokens,
             result_tokens,
-            [self.padding_token, self.start_token, self.end_token]
+            [self.output_padding_token, self.output_start_token, self.output_end_token]
         )
 
         return {'batch_loss': average_loss, 'accuracy': accuracy}
 
-    @tf.function(input_signature=[[tf.TensorSpec(dtype=tf.float32, shape=[BATCH_SIZE, INPUT_MAX_LEN]),
-                                tf.TensorSpec(dtype=tf.string, shape=[None])]])
+    @tf.function
     def _tf_test_step(self, inputs):
         return self._test_step(inputs)
 

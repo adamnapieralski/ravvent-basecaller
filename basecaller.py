@@ -8,9 +8,10 @@ import utils
 tf.random.set_seed(RANDOM_SEED)
 
 class Basecaller:
-    def __init__(self, encoder, decoder, output_text_processor) -> None:
+    def __init__(self, encoder, decoder, input_padding_value, output_text_processor) -> None:
         self.encoder = encoder
         self.decoder = decoder
+        self.input_padding_value = input_padding_value
         self.output_text_processor = output_text_processor
 
         self.output_token_string_from_index = (
@@ -77,7 +78,7 @@ class Basecaller:
         batch_size = tf.shape(raw_input)[0]
 
         # Encode the input
-        shape_checker(raw_input, ('batch', 's'))
+        shape_checker(raw_input, ('batch', 's', None))
 
         enc_output, enc_state = self.encoder(raw_input)
         shape_checker(enc_output, ('batch', 's', 'enc_units'))
@@ -99,7 +100,10 @@ class Basecaller:
 
         for t in tf.range(1, max_length, 1):
             dec_input = DecoderInput(
-                new_tokens=new_tokens, enc_output=enc_output, mask=(raw_input != -1))
+                new_tokens=new_tokens,
+                enc_output=enc_output,
+                mask=utils.input_mask(raw_input, self.input_padding_value)
+            )
 
             dec_result, dec_state = self.decoder(dec_input, state=dec_state)
 
@@ -138,10 +142,7 @@ class Basecaller:
 
         return {'token_sequences': result_tokens, 'attention': attention_stack}
 
-    @tf.function(input_signature=[
-        tf.TensorSpec(dtype=tf.float32, shape=[BATCH_SIZE, INPUT_MAX_LEN]),
-        tf.TensorSpec(dtype=tf.int32, shape=()),
-        tf.TensorSpec(dtype=tf.bool, shape=())])
+    @tf.function
     def tf_basecall_batch_to_tokens(self, raw_input, max_length=100, early_break=True):
         return self.basecall_batch_to_tokens(raw_input, max_length=max_length, early_break=early_break)
 
@@ -161,9 +162,7 @@ class Basecaller:
 
         return {'base_sequences': result_base_sequences, 'attention': basecall_tokens_res['attention']}
 
-    @tf.function(input_signature=[
-        tf.TensorSpec(dtype=tf.float32, shape=[BATCH_SIZE, INPUT_MAX_LEN]),
-        tf.TensorSpec(dtype=tf.int32, shape=())])
+    @tf.function
     def tf_basecall_batch(self, raw_input, max_length=100):
         return self.basecall_batch(raw_input, max_length=max_length)
 

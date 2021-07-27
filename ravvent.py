@@ -10,12 +10,14 @@ EPOCHS = 100
 PATIENCE = 50
 DATA_PATH = 'data/sim_out.dep.CM000663.l200000.s0'
 BASES_OFFSET = 1
+DATA_TYPE = 'raw'
+TEACHER_FORCING = True
 
-NAME_SPEC = f'raw.u{UNITS}.inmax{INPUT_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}'
+NAME_SPEC = f'raw.u{UNITS}.inmax{INPUT_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}.tf{int(TEACHER_FORCING)}'
 
 
 if __name__ == '__main__':
-    dm = DataModule(DATA_PATH, INPUT_MAX_LEN, BASES_OFFSET, BATCH_SIZE)
+    dm = DataModule(DATA_PATH, INPUT_MAX_LEN, BASES_OFFSET, BATCH_SIZE, DATA_TYPE, random_seed=RANDOM_SEED)
 
     train_ds, val_ds, test_ds = dm.get_train_val_test_split_datasets()
 
@@ -24,9 +26,14 @@ if __name__ == '__main__':
     print('TEST SIZE', tf.data.experimental.cardinality(test_ds).numpy())
 
     train_basecaller = TrainBasecaller(
-        UNITS, EMBEDDING_DIM,
-        output_text_processor=dm.output_text_processor,
-        use_tf_function=True)
+        UNITS,
+        EMBEDDING_DIM,
+        dm.output_text_processor,
+        DATA_TYPE,
+        dm.input_padding_value,
+        teacher_forcing=TEACHER_FORCING,
+        use_tf_function=True
+    )
 
     # Configure the loss and optimizer
     train_basecaller.compile(
@@ -61,6 +68,7 @@ if __name__ == '__main__':
     bc = Basecaller(
         encoder=train_basecaller.encoder,
         decoder=train_basecaller.decoder,
+        input_padding_value=dm.input_padding_value,
         output_text_processor=dm.output_text_processor
     )
 
@@ -76,4 +84,3 @@ if __name__ == '__main__':
 
     with open(f'info/info.{NAME_SPEC}.json', 'w') as info_file:
         json.dump(info, info_file)
-
