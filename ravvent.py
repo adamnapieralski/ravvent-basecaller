@@ -1,24 +1,34 @@
-import numpy as np
+import tensorflow as tf
 from enc_dec_attn import *
 from data_loader import DataModule
 from basecaller import Basecaller
 import json
 from timeit import default_timer as timer
 
-EMBEDDING_DIM = 1
-UNITS = 32
-EPOCHS = 100
+DATA_TYPE = 'event'
+
+BATCH_SIZE = 64
+
+RAW_MAX_LEN = 150
+EVENT_MAX_LEN = 40
+
+UNITS = 16
+EPOCHS = 2
 PATIENCE = 50
 DATA_PATH = 'data/sim_out.dep.CM000663.l200000.s0'
 BASES_OFFSET = 1
-DATA_TYPE = 'raw'
 TEACHER_FORCING = True
 
-NAME_SPEC = f'raw.u{UNITS}.inmax{INPUT_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}.tf{int(TEACHER_FORCING)}'
+RANDOM_SEED = 22
 
+NAME_MAX_LEN = RAW_MAX_LEN if DATA_TYPE == 'raw' else EVENT_MAX_LEN
+NAME_SPEC = f'{DATA_TYPE}.u{UNITS}.inmax{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}.tf{int(TEACHER_FORCING)}'
+
+
+tf.random.set_seed(RANDOM_SEED)
 
 if __name__ == '__main__':
-    dm = DataModule(DATA_PATH, INPUT_MAX_LEN, BASES_OFFSET, BATCH_SIZE, DATA_TYPE, random_seed=RANDOM_SEED)
+    dm = DataModule(DATA_PATH, RAW_MAX_LEN, EVENT_MAX_LEN, BASES_OFFSET, BATCH_SIZE, DATA_TYPE, random_seed=RANDOM_SEED)
 
     train_ds, val_ds, test_ds = dm.get_train_val_test_split_datasets()
 
@@ -27,11 +37,10 @@ if __name__ == '__main__':
     print('TEST SIZE', tf.data.experimental.cardinality(test_ds).numpy())
 
     train_basecaller = TrainBasecaller(
-        UNITS,
-        EMBEDDING_DIM,
-        dm.output_text_processor,
-        DATA_TYPE,
-        dm.input_padding_value,
+        units=UNITS,
+        output_text_processor=dm.output_text_processor,
+        input_data_type=DATA_TYPE,
+        input_padding_value=dm.input_padding_value,
         teacher_forcing=TEACHER_FORCING,
         use_tf_function=True
     )
@@ -39,7 +48,7 @@ if __name__ == '__main__':
     # Configure the loss and optimizer
     train_basecaller.compile(
         optimizer=tf.optimizers.Adam(),
-        loss=MaskedLoss(),
+        loss=MaskedLoss(train_basecaller.output_padding_token),
     )
     batch_loss = BatchLogs('batch_loss')
 
@@ -71,17 +80,13 @@ if __name__ == '__main__':
     bc = Basecaller(
         encoder=train_basecaller.encoder,
         decoder=train_basecaller.decoder,
+        input_data_type=DATA_TYPE,
         input_padding_value=dm.input_padding_value,
         output_text_processor=dm.output_text_processor
     )
 
     mid_2 = timer()
-    accuracies = []
-    for input_batch, target_batch in test_ds:
-        acc = bc.evaluate_batch((input_batch, target_batch))
-        accuracies.append(acc.numpy())
-
-    test_accuracy = np.mean(accuracies)
+    test_accuracy = bc.evaluate(test_ds)
     end = timer()
     print(test_accuracy)
 
