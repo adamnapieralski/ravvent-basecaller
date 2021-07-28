@@ -3,6 +3,7 @@ from enc_dec_attn import *
 from data_loader import DataModule
 from basecaller import Basecaller
 import json
+from timeit import default_timer as timer
 
 EMBEDDING_DIM = 1
 UNITS = 32
@@ -59,7 +60,9 @@ if __name__ == '__main__':
         verbose=1
     )
 
+    start = timer()
     hist = train_basecaller.fit(train_ds, epochs=EPOCHS, callbacks=[batch_loss, model_checkpoint_callback, early_stopping_callback], validation_data=val_ds)
+    mid_1 = timer()
     print(hist.history)
 
     info = {}
@@ -72,15 +75,20 @@ if __name__ == '__main__':
         output_text_processor=dm.output_text_processor
     )
 
+    mid_2 = timer()
     accuracies = []
     for input_batch, target_batch in test_ds:
         acc = bc.evaluate_batch((input_batch, target_batch))
         accuracies.append(acc.numpy())
 
     test_accuracy = np.mean(accuracies)
+    end = timer()
     print(test_accuracy)
 
     info['test_accuracy'] = test_accuracy
+
+    info['train_time'] = mid_1 - start
+    info['test_time'] = end - mid_2
 
     with open(f'info/info.{NAME_SPEC}.json', 'w') as info_file:
         json.dump(info, info_file)
