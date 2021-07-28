@@ -1,16 +1,15 @@
 import numpy as np
 import tensorflow as tf
 from shape_checker import ShapeChecker
-from enc_dec_attn import DecoderInput, BATCH_SIZE, INPUT_MAX_LEN, RANDOM_SEED
+from enc_dec_attn import DecoderInput
 
 import utils
 
-tf.random.set_seed(RANDOM_SEED)
-
 class Basecaller:
-    def __init__(self, encoder, decoder, input_padding_value, output_text_processor) -> None:
+    def __init__(self, encoder, decoder, input_data_type, input_padding_value, output_text_processor) -> None:
         self.encoder = encoder
         self.decoder = decoder
+        self.input_data_type = input_data_type
         self.input_padding_value = input_padding_value
         self.output_text_processor = output_text_processor
 
@@ -167,7 +166,7 @@ class Basecaller:
         return self.basecall_batch(raw_input, max_length=max_length)
 
     def evaluate_batch(self, data):
-        input_sequence, target_sequence = data
+        input_sequence, target_sequence = utils.unpack_data_to_input_target(data, self.input_data_type)
 
         target_token_sequences = self.output_text_processor(target_sequence)
 
@@ -181,3 +180,11 @@ class Basecaller:
             [self.padding_token, self.start_token, self.end_token]
         )
         return accuracy
+
+    def evaluate(self, data):
+        accuracies = []
+        for raw_batch, events_batch, target_batch in data:
+            acc = self.evaluate_batch((raw_batch, events_batch, target_batch))
+            accuracies.append(acc.numpy())
+
+        return np.mean(accuracies)
