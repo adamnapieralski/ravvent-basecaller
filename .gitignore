@@ -1,5 +1,10 @@
-data/
-models/
+data/*
+!data/.gitkeep
+models/*
+!models/.gitkeep
+info/*
+!info/.gitkeep
+
 *.ipynb
 .DS_Store
 
