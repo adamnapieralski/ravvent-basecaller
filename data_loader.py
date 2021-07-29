@@ -154,7 +154,7 @@ class DataModule():
                 base_id = measurement[1]
                 base_vals = []
             base_vals.append(val)
-            bases_raw_aligned_data.append(base_vals)
+        bases_raw_aligned_data.append(base_vals)
         return bases_raw_aligned_data
 
     def _get_events_sequence(self, bases_raw_aligned_data):
