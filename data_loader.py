@@ -5,14 +5,17 @@ from tensorflow.keras.layers.experimental import preprocessing
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 
 from pathlib import Path
-from sklearn.preprocessing import minmax_scale, scale
+from sklearn.preprocessing import StandardScaler
 
 from ont_fast5_api.fast5_interface import get_fast5_file
 
-INPUT_MASK = -1
+import utils
+
+
+INPUT_MASK = tf.float32.max
 
 class DataModule():
-    def __init__(self, dir: str, max_raw_length: int, max_event_length:int, bases_offset: int, batch_size: int, data_type: str, random_seed: int = 0):
+    def __init__(self, dir: str, max_raw_length: int, max_event_length:int, bases_offset: int = 1, batch_size: int = 64, val_size: float = 0.1, test_size: float = 0.1, random_seed: int = 0):
         '''Initialize DataModule
             Parameters:
                 dir (str): output directory of simulator
@@ -28,8 +31,20 @@ class DataModule():
         self.max_event_length = max_event_length
         self.bases_offset= bases_offset
         self.batch_size = batch_size
-        self.data_type = data_type
+        self.val_size = val_size
+        self.test_size = test_size
         self.random_seed = random_seed if random_seed != 0 else np.random.randint(1)
+
+        self.scalers = {
+            'raw': StandardScaler(),
+            'event': {
+                'mean': StandardScaler(),
+                'std': StandardScaler(),
+                'length': StandardScaler(),
+                'd_mean': StandardScaler(),
+                'sq_mean': StandardScaler(),
+            }
+        }
 
         self.dataset = None
         self.output_text_processor = preprocessing.TextVectorization(
@@ -44,46 +59,63 @@ class DataModule():
         self.output_text_processor.adapt(['A C G T'])
 
         raw_aligned_data, events_sequence, bases_sequence = self._load_simulator_data(self.dir)
-        raw_data, events_data, bases_data = zip(*self.samples_generator(raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
+        raw_data, event_data, bases_data = zip(*self.samples_generator(raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
 
-        # preparation
-        raw_prep = self.prepare_raw_data_for_dataset(raw_data)
-        events_prep = self.prepare_events_data_for_dataset(events_data)
-        bases_prep = self.prepare_bases_data_for_dataset(bases_data)
+        raw_data, event_data = self.pad_input_data(raw_data, event_data)
+        raw_data = np.reshape(raw_data, (len(raw_data), self.max_raw_length, 1))
+        raw_data_split, event_data_split, bases_data_split = self.train_val_test_split(raw_data, event_data, bases_data, val_size=self.val_size, test_size=self.test_size)
 
-        # verbose
-        print('MAX LEN', len(max(bases_prep)), 'RAW_MAX_LEN', self.max_raw_length, 'EVENT_MAX_LEN', self.max_event_length)
+        # scaling
+        self.fit_scalers(raw_data_split[0], event_data_split[0])
+        raw_data_split, self.event_data_split = self.scale_input_data(raw_data_split, event_data_split)
 
-        self.dataset = tf.data.Dataset.from_tensor_slices((raw_prep, events_prep, bases_prep)).shuffle(len(raw_prep), seed=self.random_seed)
-        self.dataset = self.dataset.batch(self.batch_size, drop_remainder=True)
+        bases_data_split = self.prepare_bases_data(bases_data_split)
 
-    def get_train_val_test_split_datasets(self, val_split=0.1, test_split=0.1):
-        dataset_sz = tf.data.experimental.cardinality(self.dataset).numpy()
-        train_split = 1 - val_split - test_split
+        self.dataset_train = tf.data.Dataset.from_tensor_slices((raw_data_split[0], event_data_split[0], bases_data_split[0])).batch(self.batch_size, drop_remainder=True)
+        self.dataset_val = tf.data.Dataset.from_tensor_slices((raw_data_split[1], event_data_split[1], bases_data_split[1])).batch(self.batch_size, drop_remainder=True)
+        self.dataset_test = tf.data.Dataset.from_tensor_slices((raw_data_split[2], event_data_split[2], bases_data_split[2])).batch(self.batch_size, drop_remainder=True)
 
-        train_sz = int(train_split * dataset_sz)
-        val_sz = int(val_split * dataset_sz)
+    def train_val_test_split(self, raw_data, event_data, bases_data, val_size=0.1, test_size=0.1):
+        raw_train, raw_val, raw_test = utils.train_val_test_split(raw_data, val_size=val_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
+        event_train, event_val, event_test = utils.train_val_test_split(event_data, val_size=val_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
+        bases_train, bases_val, bases_test = utils.train_val_test_split(bases_data, val_size=val_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
+        return (raw_train, raw_val, raw_test), (event_train, event_val, event_test), (bases_train, bases_val, bases_test)
 
-        train_ds = self.dataset.take(train_sz)
-        remaining_ds = self.dataset.skip(train_sz)
+    def pad_input_data(self, raw_data, event_data):
+        raw_padded = pad_sequences(raw_data, maxlen=self.max_raw_length, dtype='float32', padding='post', truncating='post', value=self.input_padding_value)
+        event_padded = pad_sequences(event_data, maxlen=self.max_event_length, dtype='float32', padding='post', truncating='post', value=self.input_padding_value)
+        return raw_padded, event_padded
 
-        val_ds = remaining_ds.take(val_sz)
-        test_ds = remaining_ds.skip(val_sz)
+    def fit_scalers(self, raw_train, event_train):
+        self.scalers['raw'].fit((raw_train[raw_train != self.input_padding_value]).reshape(-1, 1))
+        for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
+            vals = event_train[:,:,id]
+            self.scalers['event'][feat].fit((vals[vals != self.input_padding_value]).reshape(-1, 1))
 
-        return train_ds, val_ds, test_ds
+    def scale_input_data(self, raw_data_split, event_data_split):
+        raw_scaled = []
+        for raw in raw_data_split:
+            raw_no_pad = raw[raw != self.input_padding_value]
+            raw_no_pad_scaled = self.scalers['raw'].transform(raw_no_pad.reshape(-1, 1))
+            raw[raw != self.input_padding_value] = raw_no_pad_scaled.flatten()
+            raw_scaled.append(raw)
 
-    def prepare_raw_data_for_dataset(self, raw_data):
-        raw_prep = pad_sequences(raw_data, self.max_raw_length, dtype='float32', padding='post', value=self.input_padding_value)
-        raw_prep = np.reshape(raw_prep, (len(raw_prep), self.max_raw_length, 1))
-        return raw_prep
+        event_scaled = []
+        for event in event_data_split:
+            for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
+                feat_vals = event[:,:,id]
+                feat_vals_no_pad = feat_vals[feat_vals != self.input_padding_value]
+                feat_vals_no_pad_scaled = self.scalers['event'][feat].transform(feat_vals_no_pad.reshape(-1, 1))
+                feat_vals[feat_vals != self.input_padding_value] = feat_vals_no_pad_scaled.flatten()
+                event[:,:,id] = feat_vals
+            event_scaled.append(event)
+        return tuple(raw_scaled), tuple(event_scaled)
 
-    def prepare_events_data_for_dataset(self, events_data):
-        events_prep = pad_sequences(events_data, self.max_event_length, dtype='float32', padding='post', truncating='post', value=self.input_padding_value)
-        return events_prep
-
-    def prepare_bases_data_for_dataset(self, bases_data):
-        bases_prep = [' '.join(bases_sample) for bases_sample in bases_data]
-        return bases_prep
+    def prepare_bases_data(self, bases_data_split):
+        bases_prep = []
+        for bases in bases_data_split:
+            bases_prep.append([' '.join(bases_sample) for bases_sample in bases])
+        return tuple(bases_prep)
 
     def samples_generator(self, raw_aligned_data, events_sequence, bases_sequence, max_raw_length, bases_offset):
         for i in range(0, len(bases_sequence) - bases_offset + 1, bases_offset):
@@ -170,12 +202,7 @@ class DataModule():
             sq_mean = mean ** 2
             events_sequence.append((mean, std, length, d_mean, sq_mean))
 
-        events_sequence = np.array(events_sequence)
-        # STANDARIZATION lengths
-        # FIXME change this to proper scaling for subsets
-        events_sequence[:, 2] = scale(events_sequence[:, 2])
-
-        return events_sequence
+        return np.array(events_sequence)
 
     def _load_simulator_data(self, dir):
         dir = Path(dir)
@@ -187,9 +214,6 @@ class DataModule():
         raw_signal_data = self._get_fast5_raw_data(fast5_path)
         alignment_data = self._get_alignment_data(align_path)
 
-        # FIXME change this to proper scaling for subsets
-        # NORMALIZATION
-        raw_signal_data = minmax_scale(raw_signal_data)
         bases_raw_aligned_data = self._get_bases_raw_aligned_data(alignment_data, raw_signal_data)
 
         events_sequence = self._get_events_sequence(bases_raw_aligned_data)

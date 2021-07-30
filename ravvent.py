@@ -12,6 +12,9 @@ BATCH_SIZE = 64
 RAW_MAX_LEN = 150
 EVENT_MAX_LEN = 40
 
+VAL_SIZE = 0.1
+TEST_SIZE = 0.1
+
 UNITS = 16
 EPOCHS = 2
 PATIENCE = 50
@@ -28,9 +31,9 @@ NAME_SPEC = f'{DATA_TYPE}.u{UNITS}.inmax{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.
 tf.random.set_seed(RANDOM_SEED)
 
 if __name__ == '__main__':
-    dm = DataModule(DATA_PATH, RAW_MAX_LEN, EVENT_MAX_LEN, BASES_OFFSET, BATCH_SIZE, DATA_TYPE, random_seed=RANDOM_SEED)
+    dm = DataModule(DATA_PATH, RAW_MAX_LEN, EVENT_MAX_LEN, bases_offset=BASES_OFFSET, batch_size=BATCH_SIZE, val_size=VAL_SIZE, test_size=TEST_SIZE, random_seed=RANDOM_SEED)
 
-    train_ds, val_ds, test_ds = dm.get_train_val_test_split_datasets()
+    train_ds, val_ds, test_ds = dm.dataset_train, dm.dataset_val, dm.dataset_test
 
     print('TRAIN SIZE', tf.data.experimental.cardinality(train_ds).numpy())
     print('VALIDATION SIZE', tf.data.experimental.cardinality(val_ds).numpy())
