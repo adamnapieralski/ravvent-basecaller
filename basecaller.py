@@ -6,8 +6,9 @@ from enc_dec_attn import DecoderInput
 import utils
 
 class Basecaller:
-    def __init__(self, encoder, decoder, input_data_type, input_padding_value, output_text_processor) -> None:
-        self.encoder = encoder
+    def __init__(self, encoder_raw, encoder_event, decoder, input_data_type, input_padding_value, output_text_processor) -> None:
+        self.encoder_raw = encoder_raw
+        self.encoder_event = encoder_event
         self.decoder = decoder
         self.input_data_type = input_data_type
         self.input_padding_value = input_padding_value
@@ -71,17 +72,34 @@ class Basecaller:
 
         return new_tokens
 
-    def basecall_batch_to_tokens(self, raw_input, *, max_length=100, temperature=1.0, early_break=True):
+    def basecall_batch_to_tokens(self, input_data, *, max_length=100, temperature=1.0, early_break=True):
         shape_checker = ShapeChecker()
 
-        batch_size = tf.shape(raw_input)[0]
-
         # Encode the input
-        shape_checker(raw_input, ('batch', 's', None))
+        if self.input_data_type == 'joint':
+            # input data as (raw, event) tuple
+            (raw_input, event_input) = input_data
+            enc_output_raw, enc_state_raw = self.encoder_raw(raw_input)
+            enc_output_event, enc_state_event = self.encoder_event(event_input)
+            enc_output, enc_state = tf.concat((enc_output_raw, enc_output_event), axis=1), tf.concat((enc_state_raw, enc_state_event), axis=1)
 
-        enc_output, enc_state = self.encoder(raw_input)
-        shape_checker(enc_output, ('batch', 's', 'enc_units'))
-        shape_checker(enc_state, ('batch', 'enc_units'))
+            input_mask_raw = utils.input_mask(raw_input, self.input_padding_value)
+            input_mask_event = utils.input_mask(event_input, self.input_padding_value)
+            input_mask = tf.concat((input_mask_raw, input_mask_event), axis=-1)
+
+            batch_size = tf.shape(raw_input)[0]
+        else:
+            batch_size = tf.shape(input_data)[0]
+            if self.input_data_type == 'raw':
+                enc_output_raw, enc_state_raw = self.encoder_raw(input_data)
+                enc_output, enc_state = enc_output_raw, enc_state_raw
+
+                input_mask = utils.input_mask(input_data, self.input_padding_value)
+            elif self.input_data_type == 'event':
+                enc_output_event, enc_state_event = self.encoder_event(input_data)
+                enc_output, enc_state = enc_output_event, enc_state_event
+
+                input_mask = utils.input_mask(input_data, self.input_padding_value)
 
         # Initialize the decoder
         dec_state = enc_state
@@ -101,7 +119,7 @@ class Basecaller:
             dec_input = DecoderInput(
                 new_tokens=new_tokens,
                 enc_output=enc_output,
-                mask=utils.input_mask(raw_input, self.input_padding_value)
+                mask=input_mask
             )
 
             dec_result, dec_state = self.decoder(dec_input, state=dec_state)
@@ -142,19 +160,19 @@ class Basecaller:
         return {'token_sequences': result_tokens, 'attention': attention_stack}
 
     @tf.function
-    def tf_basecall_batch_to_tokens(self, raw_input, max_length=100, early_break=True):
-        return self.basecall_batch_to_tokens(raw_input, max_length=max_length, early_break=early_break)
+    def tf_basecall_batch_to_tokens(self, input_data, max_length=100, early_break=True):
+        return self.basecall_batch_to_tokens(input_data, max_length=max_length, early_break=early_break)
 
 
     def basecall_batch(self,
-                        raw_input,
+                        input_data,
                         *,
                         max_length=100,
                         return_attention=True,
                         temperature=1.0):
         shape_checker = ShapeChecker()
 
-        basecall_tokens_res = self.tf_basecall_batch_to_tokens(raw_input, max_length=max_length)
+        basecall_tokens_res = self.tf_basecall_batch_to_tokens(input_data, max_length=max_length)
         token_sequences = basecall_tokens_res['token_sequences']
         result_base_sequences = self.tokens_to_bases_sequence(token_sequences)
         shape_checker(result_base_sequences, ('batch',))
@@ -162,16 +180,16 @@ class Basecaller:
         return {'base_sequences': result_base_sequences, 'attention': basecall_tokens_res['attention']}
 
     @tf.function
-    def tf_basecall_batch(self, raw_input, max_length=100):
-        return self.basecall_batch(raw_input, max_length=max_length)
+    def tf_basecall_batch(self, raw_input, event_input, max_length=100):
+        return self.basecall_batch(raw_input, event_input, max_length=max_length)
 
     def evaluate_batch(self, data):
-        input_sequence, target_sequence = utils.unpack_data_to_input_target(data, self.input_data_type)
+        input_data, target_sequence = utils.unpack_data_to_input_target(data, self.input_data_type)
 
         target_token_sequences = self.output_text_processor(target_sequence)
 
         max_target_length = tf.shape(target_token_sequences)[1]
-        translate_res = self.tf_basecall_batch_to_tokens(input_sequence, max_length=max_target_length, early_break=False)
+        translate_res = self.tf_basecall_batch_to_tokens(input_data, max_length=max_target_length, early_break=False)
         pred_token_sequences = translate_res['token_sequences']
 
         accuracy = utils.masked_accuracy(
