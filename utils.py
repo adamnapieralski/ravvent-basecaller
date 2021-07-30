@@ -24,10 +24,12 @@ def unpack_data_to_input_target(data, input_data_type):
     raw_sequence, events_sequence, target_sequence = data
 
     if input_data_type == 'raw':
-        input_sequence = raw_sequence
+        input_data = raw_sequence
     elif input_data_type == 'event':
-        input_sequence = events_sequence
-    return input_sequence, target_sequence
+        input_data = events_sequence
+    elif input_data_type == 'joint':
+        input_data = (raw_sequence, events_sequence)
+    return input_data, target_sequence
 
 def train_val_test_split(data, val_size=None, test_size=None, random_state=None, shuffle=True, stratify=None):
     train, test = train_test_split(data, test_size=test_size+val_size, random_state=random_state, shuffle=shuffle, stratify=stratify)
