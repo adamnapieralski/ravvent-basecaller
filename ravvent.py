@@ -18,7 +18,7 @@ TEST_SIZE = 0.1
 UNITS = 16
 EPOCHS = 2
 PATIENCE = 50
-DATA_PATH = 'data/sim_out.dep.CM000663.l200000.s0'
+DATA_PATH = 'data/chiron/train'
 BASES_OFFSET = 1
 TEACHER_FORCING = False
 
@@ -31,7 +31,7 @@ NAME_SPEC = f'{DATA_TYPE}.u{UNITS}.inmax{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.
 tf.random.set_seed(RANDOM_SEED)
 
 if __name__ == '__main__':
-    dm = DataModule(DATA_PATH, RAW_MAX_LEN, EVENT_MAX_LEN, bases_offset=BASES_OFFSET, batch_size=BATCH_SIZE, val_size=VAL_SIZE, test_size=TEST_SIZE, random_seed=RANDOM_SEED)
+    dm = DataModule(DATA_PATH, RAW_MAX_LEN, EVENT_MAX_LEN, bases_offset=BASES_OFFSET, batch_size=BATCH_SIZE, val_size=VAL_SIZE, test_size=TEST_SIZE, load_source='chiron', random_seed=RANDOM_SEED)
 
     train_ds, val_ds, test_ds = dm.dataset_train, dm.dataset_val, dm.dataset_test
 

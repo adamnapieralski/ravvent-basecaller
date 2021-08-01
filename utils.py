@@ -1,5 +1,6 @@
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
+from sklearn.utils import shuffle as sklearn_shuffle
 
 def masked_accuracy(y_true, y_pred, omit_vals):
     match = tf.cast(y_true == y_pred, tf.int64)
@@ -29,7 +30,28 @@ def unpack_data_to_input_target(data, input_data_type):
         input_sequence = events_sequence
     return input_sequence, target_sequence
 
-def train_val_test_split(data, val_size=None, test_size=None, random_state=None, shuffle=True, stratify=None):
-    train, test = train_test_split(data, test_size=test_size+val_size, random_state=random_state, shuffle=shuffle, stratify=stratify)
-    val, test = train_test_split(test, train_size=(val_size / (val_size + test_size)), random_state=random_state, shuffle=shuffle, stratify=stratify)
-    return train, val, test
+def train_val_test_split(data, train_size=0.8, val_size=0.1, test_size=0.1, random_state=None, shuffle=True, stratify=None):
+    if train_size + val_size + test_size != 1:
+        raise Exception('Train/validation/test datasets fractions don\'t sum up to 1.')
+
+    data_sh = data
+    if shuffle:
+        data_sh = sklearn_shuffle(data, random_state=random_state)
+
+    if train_size > 0 and train_size < 1:
+        train, test = train_test_split(data_sh, test_size=test_size+val_size, random_state=random_state, shuffle=False, stratify=stratify)
+        if test_size == 0:
+            return train, test, None
+        if val_size == 0:
+            return train, None, test
+        val, test = train_test_split(test, train_size=(val_size / (val_size + test_size)), random_state=random_state, shuffle=False, stratify=stratify)
+        return train, val, test
+    if train_size == 0:
+        if val_size == 1:
+            return None, data_sh, None
+        if test_size == 1:
+            return None, None, data_sh
+        val, test = train_test_split(data_sh, test_size=test_size, random_state=random_state, shuffle=False, stratify=stratify)
+        return None, val, test
+    if train_size == 1:
+        return data_sh, None, None
