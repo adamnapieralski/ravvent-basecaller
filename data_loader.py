@@ -15,15 +15,16 @@ import utils
 INPUT_MASK = tf.float32.max
 
 class DataModule():
-    def __init__(self, dir: str, max_raw_length: int, max_event_length:int, bases_offset: int = 1, batch_size: int = 64, val_size: float = 0.1, test_size: float = 0.1, random_seed: int = 0):
+    def __init__(self, dir: str, max_raw_length: int, max_event_length:int, bases_offset: int = 1, batch_size: int = 64, train_size: float = 0.8, val_size: float = 0.1, test_size: float = 0.1, load_source: str = 'simulator', random_seed: int = 0):
         '''Initialize DataModule
             Parameters:
-                dir (str): output directory of simulator
+                dir (str): directory to load data from (dependent on load_source)
                 max_raw_length (int):
                 max_event_length (int):
                 bases_offset (int): Number of bases between following data rows
                 batch_size (int): Number of data rows in batch
                 data_type (str): Data type - allowed values: "raw", "event"
+                load_source (str): supported 'simulator'/'chiron'
                 random_seed (int): Random seed
         '''
         self.dir = dir
@@ -31,8 +32,10 @@ class DataModule():
         self.max_event_length = max_event_length
         self.bases_offset= bases_offset
         self.batch_size = batch_size
+        self.train_size = train_size
         self.val_size = val_size
         self.test_size = test_size
+        self.load_source = load_source
         self.random_seed = random_seed if random_seed != 0 else np.random.randint(1)
 
         self.scalers = {
@@ -50,35 +53,52 @@ class DataModule():
         self.output_text_processor = preprocessing.TextVectorization(
             standardize=text_lower_and_start_end,
         )
+        self.output_text_processor.adapt(['A C G T'])
 
         self.input_padding_value = INPUT_MASK
 
         self.setup()
 
-    def setup(self):
-        self.output_text_processor.adapt(['A C G T'])
+    def load_data_samples(self):
+        if self.load_source == 'simulator':
+            raw_aligned_data, events_sequence, bases_sequence = self._load_simulator_data(self.dir)
+            raw_samples, event_samples, bases_samples = zip(*self.samples_generator(raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
+        elif self.load_source == 'chiron':
+            raw_samples, event_samples, bases_samples = self._load_all_chiron_data_samples_from_dir(self.dir)
 
-        raw_aligned_data, events_sequence, bases_sequence = self._load_simulator_data(self.dir)
-        raw_data, event_data, bases_data = zip(*self.samples_generator(raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
+        return raw_samples, event_samples, bases_samples
 
-        raw_data, event_data = self.pad_input_data(raw_data, event_data)
+    def process_and_split_data_samples(self, raw_samples, event_samples, bases_samples):
+        raw_data, event_data = self.pad_input_data(raw_samples, event_samples)
         raw_data = np.reshape(raw_data, (len(raw_data), self.max_raw_length, 1))
-        raw_data_split, event_data_split, bases_data_split = self.train_val_test_split(raw_data, event_data, bases_data, val_size=self.val_size, test_size=self.test_size)
+        raw_data_split, event_data_split, bases_data_split = self.train_val_test_split(raw_data, event_data, bases_samples, train_size=self.train_size, val_size=self.val_size, test_size=self.test_size)
 
         # scaling
-        self.fit_scalers(raw_data_split[0], event_data_split[0])
+        if raw_data_split[0] is not None and event_data_split[0] is not None:
+            self.fit_scalers(raw_data_split[0], event_data_split[0])
         raw_data_split, self.event_data_split = self.scale_input_data(raw_data_split, event_data_split)
 
         bases_data_split = self.prepare_bases_data(bases_data_split)
 
-        self.dataset_train = tf.data.Dataset.from_tensor_slices((raw_data_split[0], event_data_split[0], bases_data_split[0])).batch(self.batch_size, drop_remainder=True)
-        self.dataset_val = tf.data.Dataset.from_tensor_slices((raw_data_split[1], event_data_split[1], bases_data_split[1])).batch(self.batch_size, drop_remainder=True)
-        self.dataset_test = tf.data.Dataset.from_tensor_slices((raw_data_split[2], event_data_split[2], bases_data_split[2])).batch(self.batch_size, drop_remainder=True)
+        return raw_data_split, event_data_split, bases_data_split
 
-    def train_val_test_split(self, raw_data, event_data, bases_data, val_size=0.1, test_size=0.1):
-        raw_train, raw_val, raw_test = utils.train_val_test_split(raw_data, val_size=val_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
-        event_train, event_val, event_test = utils.train_val_test_split(event_data, val_size=val_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
-        bases_train, bases_val, bases_test = utils.train_val_test_split(bases_data, val_size=val_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
+    def save_to_datasets(self, raw_data_split, event_data_split, bases_data_split):
+        if self.train_size > 0:
+            self.dataset_train = tf.data.Dataset.from_tensor_slices((raw_data_split[0], event_data_split[0], bases_data_split[0])).batch(self.batch_size, drop_remainder=True)
+        if self.val_size > 0:
+            self.dataset_val = tf.data.Dataset.from_tensor_slices((raw_data_split[1], event_data_split[1], bases_data_split[1])).batch(self.batch_size, drop_remainder=True)
+        if self.test_size > 0:
+            self.dataset_test = tf.data.Dataset.from_tensor_slices((raw_data_split[2], event_data_split[2], bases_data_split[2])).batch(self.batch_size, drop_remainder=True)
+
+    def setup(self):
+        raw_samples, event_samples, bases_samples = self.load_data_samples()
+        raw_data_split, event_data_split, bases_data_split = self.process_and_split_data_samples(raw_samples, event_samples, bases_samples)
+        self.save_to_datasets(raw_data_split, event_data_split, bases_data_split)
+
+    def train_val_test_split(self, raw_data, event_data, bases_data, train_size=0.8, val_size=0.1, test_size=0.1):
+        raw_train, raw_val, raw_test = utils.train_val_test_split(raw_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
+        event_train, event_val, event_test = utils.train_val_test_split(event_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
+        bases_train, bases_val, bases_test = utils.train_val_test_split(bases_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
         return (raw_train, raw_val, raw_test), (event_train, event_val, event_test), (bases_train, bases_val, bases_test)
 
     def pad_input_data(self, raw_data, event_data):
@@ -95,6 +115,9 @@ class DataModule():
     def scale_input_data(self, raw_data_split, event_data_split):
         raw_scaled = []
         for raw in raw_data_split:
+            if raw is None:
+                raw_scaled.append(None)
+                continue
             raw_no_pad = raw[raw != self.input_padding_value]
             raw_no_pad_scaled = self.scalers['raw'].transform(raw_no_pad.reshape(-1, 1))
             raw[raw != self.input_padding_value] = raw_no_pad_scaled.flatten()
@@ -102,6 +125,9 @@ class DataModule():
 
         event_scaled = []
         for event in event_data_split:
+            if event is None:
+                event_scaled.append(None)
+                continue
             for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
                 feat_vals = event[:,:,id]
                 feat_vals_no_pad = feat_vals[feat_vals != self.input_padding_value]
@@ -114,6 +140,9 @@ class DataModule():
     def prepare_bases_data(self, bases_data_split):
         bases_prep = []
         for bases in bases_data_split:
+            if bases is None:
+                bases_prep.append(None)
+                continue
             bases_prep.append([' '.join(bases_sample) for bases_sample in bases])
         return tuple(bases_prep)
 
@@ -215,6 +244,42 @@ class DataModule():
         alignment_data = self._get_alignment_data(align_path)
 
         bases_raw_aligned_data = self._get_bases_raw_aligned_data(alignment_data, raw_signal_data)
+
+        events_sequence = self._get_events_sequence(bases_raw_aligned_data)
+
+        return bases_raw_aligned_data, events_sequence, bases_sequence
+
+    ### chiron load source processing
+
+    def _load_all_chiron_data_samples_from_dir(self, dir):
+        dir = Path(dir)
+        signals_paths = [p for p in dir.iterdir() if p.suffix == '.signal']
+        signals_paths.sort()
+        labels_paths = [p for p in dir.iterdir() if p.suffix == '.label']
+        labels_paths.sort()
+
+        raw_samples_all, event_samples_all, bases_samples_all = [], [], []
+
+        for signal_path, label_path in zip(signals_paths, labels_paths):
+            bases_raw_aligned_data, events_sequence, bases_sequence = self._load_chiron_single_data(signal_path, label_path)
+            raw_samples, event_samples, bases_samples = zip(*self.samples_generator(bases_raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
+            raw_samples_all.extend(raw_samples)
+            event_samples_all.extend(event_samples)
+            bases_samples_all.extend(bases_samples)
+
+        return raw_samples_all, event_samples_all, bases_samples_all
+
+
+    def _load_chiron_single_data(self, signal_path, label_path):
+        signal = np.loadtxt(signal_path)
+        labels = np.loadtxt(label_path, dtype='object')
+        ranges_ids = labels[:,0:2].astype('int')
+        bases_sequence = labels[:,2]
+
+        bases_raw_aligned_data = []
+
+        for base_range in ranges_ids:
+            bases_raw_aligned_data.append(signal[base_range[0]:base_range[1]])
 
         events_sequence = self._get_events_sequence(bases_raw_aligned_data)
 
