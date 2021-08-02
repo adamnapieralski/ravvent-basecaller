@@ -2,6 +2,8 @@ import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle as sklearn_shuffle
 
+from shape_checker import ShapeChecker
+
 def masked_accuracy(y_true, y_pred, omit_vals):
     match = tf.cast(y_true == y_pred, tf.int64)
 
@@ -57,3 +59,35 @@ def train_val_test_split(data, train_size=0.8, val_size=0.1, test_size=0.1, rand
         return None, val, test
     if train_size == 1:
         return data_sh, None, None
+
+class BatchLogs(tf.keras.callbacks.Callback):
+    def __init__(self, key):
+        self.key = key
+        self.logs = []
+
+    def on_train_batch_end(self, n, logs):
+        self.logs.append(logs[self.key])
+
+class MaskedLoss(tf.keras.losses.Loss):
+    def __init__(self, padding_value=0):
+        self.name = 'masked_loss'
+        self.loss = tf.keras.losses.SparseCategoricalCrossentropy(
+            from_logits=True, reduction='none')
+        self.padding_value = padding_value
+
+    def __call__(self, y_true, y_pred):
+        shape_checker = ShapeChecker()
+        shape_checker(y_true, ('batch', 't'))
+        shape_checker(y_pred, ('batch', 't', 'logits'))
+
+        # Calculate the loss for each item in the batch.
+        loss = self.loss(y_true, y_pred)
+        shape_checker(loss, ('batch', 't'))
+
+        # Mask off the losses on padding.
+        mask = tf.cast(y_true != self.padding_value, tf.float32)
+        shape_checker(mask, ('batch', 't'))
+        loss *= mask
+
+        # Return the total.
+        return tf.reduce_sum(loss)

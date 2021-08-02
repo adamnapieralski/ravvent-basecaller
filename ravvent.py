@@ -1,9 +1,10 @@
 import tensorflow as tf
-from enc_dec_attn import *
+from timeit import default_timer as timer
+import json
+
 from data_loader import DataModule
 from basecaller import Basecaller
-import json
-from timeit import default_timer as timer
+import utils
 
 DATA_TYPE = 'joint'
 
@@ -43,21 +44,20 @@ if __name__ == '__main__':
     print('VALIDATION SIZE', tf.data.experimental.cardinality(val_ds).numpy())
     print('TEST SIZE', tf.data.experimental.cardinality(test_ds).numpy())
 
-    train_basecaller = TrainBasecaller(
+    basecaller = Basecaller(
         units=UNITS,
         output_text_processor=dm.output_text_processor,
         input_data_type=DATA_TYPE,
         input_padding_value=dm.input_padding_value,
-        teacher_forcing=TEACHER_FORCING,
-        use_tf_function=True
+        teacher_forcing=TEACHER_FORCING
     )
 
     # Configure the loss and optimizer
-    train_basecaller.compile(
+    basecaller.compile(
         optimizer=tf.optimizers.Adam(),
-        loss=MaskedLoss(train_basecaller.output_padding_token),
+        loss=utils.MaskedLoss(basecaller.output_padding_token),
     )
-    batch_loss = BatchLogs('batch_loss')
+    batch_loss = utils.BatchLogs('batch_loss')
 
     checkpoint_filepath = f'models/model.{NAME_SPEC}/model_chp'
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
@@ -77,24 +77,15 @@ if __name__ == '__main__':
     )
 
     start = timer()
-    hist = train_basecaller.fit(train_ds, epochs=EPOCHS, callbacks=[batch_loss, model_checkpoint_callback, early_stopping_callback], validation_data=val_ds)
+    hist = basecaller.fit(train_ds, epochs=EPOCHS, callbacks=[batch_loss, model_checkpoint_callback, early_stopping_callback], validation_data=val_ds)
     mid_1 = timer()
     print(hist.history)
 
     info = {}
     info['train_history'] = hist.history
 
-    bc = Basecaller(
-        encoder_raw=train_basecaller.encoder_raw,
-        encoder_event=train_basecaller.encoder_event,
-        decoder=train_basecaller.decoder,
-        input_data_type=DATA_TYPE,
-        input_padding_value=dm.input_padding_value,
-        output_text_processor=dm.output_text_processor
-    )
-
     mid_2 = timer()
-    test_accuracy = bc.evaluate(test_ds)
+    test_accuracy = basecaller.evaluate_test(test_ds)
     end = timer()
     print(test_accuracy)
 
