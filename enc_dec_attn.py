@@ -45,11 +45,12 @@ class Encoder(tf.keras.layers.Layer):
         return output, state
 
 class BahdanauAttention(tf.keras.layers.Layer):
-    def __init__(self, units):
+    def __init__(self, units_dec, units_enc):
         super().__init__()
         # For Eqn. (4), the  Bahdanau attention
-        self.W1 = tf.keras.layers.Dense(units, use_bias=False)
-        self.W2 = tf.keras.layers.Dense(units, use_bias=False)
+        # TODO same units, lost details on query (dec rnn output)
+        self.W1 = tf.keras.layers.Dense(units_enc, use_bias=False)
+        self.W2 = tf.keras.layers.Dense(units_enc, use_bias=False)
 
         self.attention = tf.keras.layers.AdditiveAttention()
 
@@ -61,11 +62,12 @@ class BahdanauAttention(tf.keras.layers.Layer):
 
         # From Eqn. (4), `W1@ht`.
         w1_query = self.W1(query)
-        shape_checker(w1_query, ('batch', 't', 'attn_units'))
+        # shape_checker(w1_query, ('batch', 't', 'attn_units'))
 
         # From Eqn. (4), `W2@hs`.
         w2_key = self.W2(value)
-        shape_checker(w2_key, ('batch', 's', 'attn_units'))
+        # shape_checker(w2_key, ('batch', 's', 'attn_units'))
+
 
         query_mask = tf.ones(tf.shape(query)[:-1], dtype=bool)
         value_mask = mask
@@ -90,9 +92,10 @@ class DecoderOutput(typing.NamedTuple):
     attention_weights: Any
 
 class Decoder(tf.keras.layers.Layer):
-    def __init__(self, output_vocab_size, dec_units):
+    def __init__(self, output_vocab_size, dec_units, enc_units):
         super(Decoder, self).__init__()
         self.dec_units = dec_units
+        self.enc_units = enc_units
         self.output_vocab_size = output_vocab_size
         self.embedding_dim = 1 # constant
 
@@ -106,7 +109,7 @@ class Decoder(tf.keras.layers.Layer):
                                         recurrent_initializer='glorot_uniform')
 
         # For step 3. The RNN output will be the query for the attention layer.
-        self.attention = BahdanauAttention(self.dec_units)
+        self.attention = BahdanauAttention(self.dec_units, self.enc_units)
 
         # For step 4. Eqn. (3): converting `ct` to `at`
         self.Wc = tf.keras.layers.Dense(dec_units, activation=tf.math.tanh,
@@ -138,10 +141,11 @@ class Decoder(tf.keras.layers.Layer):
 
         # Step 3. Use the RNN output as the query for the attention over the
         # encoder output.
+        # print(rnn_output, inputs.enc_output, inputs.mask)
         context_vector, attention_weights = self.attention(
             query=rnn_output, value=inputs.enc_output, mask=inputs.mask)
-        shape_checker(context_vector, ('batch', 't', 'dec_units'))
-        shape_checker(attention_weights, ('batch', 't', 's'))
+        # shape_checker(context_vector, ('batch', 't', 'dec_units'))
+        # shape_checker(attention_weights, ('batch', 't', 's'))
 
         # Step 4. Eqn. (3): Join the context_vector and rnn_output
         #     [ct; ht] shape: (batch t, value_units + query_units)
@@ -149,11 +153,11 @@ class Decoder(tf.keras.layers.Layer):
 
         # Step 4. Eqn. (3): `at = tanh(Wc@[ct; ht])`
         attention_vector = self.Wc(context_and_rnn_output)
-        shape_checker(attention_vector, ('batch', 't', 'dec_units'))
+        # shape_checker(attention_vector, ('batch', 't', 'dec_units'))
 
         # Step 5. Generate logit predictions:
         logits = self.fc(attention_vector)
-        shape_checker(logits, ('batch', 't', 'output_vocab_size'))
+        # shape_checker(logits, ('batch', 't', 'output_vocab_size'))
 
         return DecoderOutput(logits, attention_weights), state
 
@@ -174,7 +178,7 @@ class MaskedLoss(tf.keras.losses.Loss):
         shape_checker(loss, ('batch', 't'))
 
         # Mask off the losses on padding.
-        mask = tf.cast(y_true != 0, tf.float32)
+        mask = tf.cast(y_true != self.padding_value, tf.float32)
         shape_checker(mask, ('batch', 't'))
         loss *= mask
 
@@ -185,10 +189,15 @@ class TrainBasecaller(tf.keras.Model):
     def __init__(self, units: int, output_text_processor, input_data_type: str, input_padding_value, teacher_forcing: bool = True, val_teacher_forcing: bool = False, use_tf_function: bool = True):
         super().__init__()
         # Build the encoder and decoder
-        encoder = Encoder(units, input_data_type)
-        decoder = Decoder(output_text_processor.vocabulary_size(), units)
+        encoder_raw = Encoder(units, 'raw')
+        encoder_event = Encoder(units, 'event')
+        if input_data_type == 'joint':
+            decoder = Decoder(output_text_processor.vocabulary_size(), 2 * units, units)
+        else:
+            decoder = Decoder(output_text_processor.vocabulary_size(), units, units)
 
-        self.encoder = encoder
+        self.encoder_raw = encoder_raw
+        self.encoder_event = encoder_event
         self.decoder = decoder
         self.output_text_processor = output_text_processor
         self.input_data_type = input_data_type
@@ -214,10 +223,17 @@ class TrainBasecaller(tf.keras.Model):
     def test_step(self, inputs):
         return self._tf_test_step(inputs)
 
-    def _preprocess(self, input_sequence, target_sequence):
-        self.shape_checker(input_sequence, ('batch', 's', None))
-        input_mask = utils.input_mask(input_sequence, self.input_padding_value)
-        self.shape_checker(input_mask, ('batch', 's'))
+    def _preprocess(self, input_data, target_sequence):
+        if self.input_data_type == 'joint':
+            (raw_input, event_input) = input_data
+            self.shape_checker(raw_input, ('batch', 's', None))
+            self.shape_checker(event_input, ('batch', 's', None))
+            input_mask_raw = utils.input_mask(raw_input, self.input_padding_value)
+            input_mask_event = utils.input_mask(event_input, self.input_padding_value)
+            input_mask = tf.concat((input_mask_raw, input_mask_event), axis=-1)
+        else:
+            self.shape_checker(input_data, ('batch', 's', None))
+            input_mask = utils.input_mask(input_data, self.input_padding_value)
 
         # Convert the text to token IDs
         self.shape_checker(target_sequence, ('batch',))
@@ -228,20 +244,38 @@ class TrainBasecaller(tf.keras.Model):
         target_mask = target_tokens != self.output_padding_token
         self.shape_checker(target_mask, ('batch', 't'))
 
-        return input_sequence, input_mask, target_tokens, target_mask
+        return input_data, input_mask, target_tokens, target_mask
 
     def _train_step(self, data):
-        input_sequence, target_sequence = utils.unpack_data_to_input_target(data, self.input_data_type)
+        input_data, target_sequence = utils.unpack_data_to_input_target(data, self.input_data_type)
 
-        (input_sequence, input_mask, target_tokens, target_mask) = self._preprocess(input_sequence, target_sequence)
+        (input_data, input_mask, target_tokens, target_mask) = self._preprocess(input_data, target_sequence)
 
         max_target_length = tf.shape(target_tokens)[1]
 
         with tf.GradientTape() as tape:
             # Encode the input
-            enc_output, enc_state = self.encoder(input_sequence)
-            self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
-            self.shape_checker(enc_state, ('batch', 'enc_units'))
+            if self.input_data_type == 'joint':
+                (raw_input, event_input) = input_data
+
+                enc_output_raw, enc_state_raw = self.encoder_raw(raw_input)
+                self.shape_checker(enc_output_raw, ('batch', 's', 'enc_units'))
+                self.shape_checker(enc_state_raw, ('batch', 'enc_units'))
+
+                enc_output_event, enc_state_event = self.encoder_event(event_input)
+
+                enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
+                enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
+
+            elif self.input_data_type == 'raw':
+                enc_output, enc_state= self.encoder_raw(input_data)
+                self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
+                self.shape_checker(enc_state, ('batch', 'enc_units'))
+
+            elif self.input_data_type == 'event':
+                enc_output, enc_state= self.encoder_event(input_data)
+                self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
+                self.shape_checker(enc_state, ('batch', 'enc_units'))
 
             # Initialize the decoder's state to the encoder's final state.
             # This only works if the encoder and decoder have the same number of
@@ -307,11 +341,35 @@ class TrainBasecaller(tf.keras.Model):
         return self._train_step(data)
 
     def _test_step(self, data):
-        input_sequence, target_sequence = utils.unpack_data_to_input_target(data, self.input_data_type)
+        input_data, target_sequence = utils.unpack_data_to_input_target(data, self.input_data_type)
 
-        (input_sequence, input_mask, target_tokens, target_mask) = self._preprocess(input_sequence, target_sequence)
+        (input_data, input_mask, target_tokens, target_mask) = self._preprocess(input_data, target_sequence)
 
-        enc_output, enc_state = self.encoder(input_sequence)
+        if self.input_data_type == 'joint':
+            (raw_input, event_input) = input_data
+
+            enc_output_raw, enc_state_raw = self.encoder_raw(raw_input)
+            self.shape_checker(enc_output_raw, ('batch', 's', 'enc_units'))
+            self.shape_checker(enc_state_raw, ('batch', 'enc_units'))
+
+            enc_output_event, enc_state_event = self.encoder_event(event_input)
+
+            enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
+            enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
+
+            batch_size = tf.shape(raw_input)[0]
+
+        elif self.input_data_type == 'raw':
+            enc_output, enc_state= self.encoder_raw(input_data)
+            self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
+            self.shape_checker(enc_state, ('batch', 'enc_units'))
+            batch_size = tf.shape(input_data)[0]
+
+        elif self.input_data_type == 'event':
+            enc_output, enc_state= self.encoder_event(input_data)
+            self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
+            self.shape_checker(enc_state, ('batch', 'enc_units'))
+            batch_size = tf.shape(input_data)[0]
 
         dec_state = enc_state
         val_loss = tf.constant(0.0)
@@ -322,7 +380,6 @@ class TrainBasecaller(tf.keras.Model):
         # for accuracy measurement, as in Basecaller
         result_tokens = tf.TensorArray(tf.int64, size=1, dynamic_size=True)
 
-        batch_size = tf.shape(input_sequence)[0]
         done = tf.zeros([batch_size, 1], dtype=tf.bool)
         result_tokens = result_tokens.write(0, input_tokens)
 

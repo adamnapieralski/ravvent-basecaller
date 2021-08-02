@@ -5,7 +5,7 @@ from basecaller import Basecaller
 import json
 from timeit import default_timer as timer
 
-DATA_TYPE = 'event'
+DATA_TYPE = 'joint'
 
 BATCH_SIZE = 64
 
@@ -24,8 +24,12 @@ TEACHER_FORCING = False
 
 RANDOM_SEED = 22
 
-NAME_MAX_LEN = RAW_MAX_LEN if DATA_TYPE == 'raw' else EVENT_MAX_LEN
-NAME_SPEC = f'{DATA_TYPE}.u{UNITS}.inmax{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}.tf{int(TEACHER_FORCING)}'
+if DATA_TYPE == 'joint':
+    NAME_MAX_LEN = f'rawmax{RAW_MAX_LEN}.evmax{EVENT_MAX_LEN}'
+else:
+    NAME_MAX_LEN = f'rawmax{RAW_MAX_LEN}' if DATA_TYPE == 'raw' else f'evmax{EVENT_MAX_LEN}'
+
+NAME_SPEC = f'{DATA_TYPE}.u{UNITS}.{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}.tf{int(TEACHER_FORCING)}'
 
 
 tf.random.set_seed(RANDOM_SEED)
@@ -81,7 +85,8 @@ if __name__ == '__main__':
     info['train_history'] = hist.history
 
     bc = Basecaller(
-        encoder=train_basecaller.encoder,
+        encoder_raw=train_basecaller.encoder_raw,
+        encoder_event=train_basecaller.encoder_event,
         decoder=train_basecaller.decoder,
         input_data_type=DATA_TYPE,
         input_padding_value=dm.input_padding_value,
