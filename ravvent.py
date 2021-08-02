@@ -13,6 +13,7 @@ BATCH_SIZE = 64
 RAW_MAX_LEN = 150
 EVENT_MAX_LEN = 40
 
+TRAIN_SIZE = 0.8
 VAL_SIZE = 0.1
 TEST_SIZE = 0.1
 
@@ -36,13 +37,9 @@ NAME_SPEC = f'{DATA_TYPE}.u{UNITS}.{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{P
 tf.random.set_seed(RANDOM_SEED)
 
 if __name__ == '__main__':
-    dm = DataModule(DATA_PATH, RAW_MAX_LEN, EVENT_MAX_LEN, bases_offset=BASES_OFFSET, batch_size=BATCH_SIZE, val_size=VAL_SIZE, test_size=TEST_SIZE, load_source='chiron', random_seed=RANDOM_SEED)
+    dm = DataModule(DATA_PATH, RAW_MAX_LEN, EVENT_MAX_LEN, bases_offset=BASES_OFFSET, batch_size=BATCH_SIZE, train_size=TRAIN_SIZE, val_size=VAL_SIZE, test_size=TEST_SIZE, load_source='chiron', random_seed=RANDOM_SEED, verbose=True)
 
     train_ds, val_ds, test_ds = dm.dataset_train, dm.dataset_val, dm.dataset_test
-
-    print('TRAIN SIZE', tf.data.experimental.cardinality(train_ds).numpy())
-    print('VALIDATION SIZE', tf.data.experimental.cardinality(val_ds).numpy())
-    print('TEST SIZE', tf.data.experimental.cardinality(test_ds).numpy())
 
     basecaller = Basecaller(
         units=UNITS,

@@ -15,7 +15,7 @@ import utils
 INPUT_MASK = tf.float32.max
 
 class DataModule():
-    def __init__(self, dir: str, max_raw_length: int, max_event_length:int, bases_offset: int = 1, batch_size: int = 64, train_size: float = 0.8, val_size: float = 0.1, test_size: float = 0.1, load_source: str = 'simulator', random_seed: int = 0):
+    def __init__(self, dir: str, max_raw_length: int, max_event_length:int, bases_offset: int = 1, batch_size: int = 64, train_size: float = 0.8, val_size: float = 0.1, test_size: float = 0.1, load_source: str = 'simulator', random_seed: int = 0, verbose: bool = False):
         '''Initialize DataModule
             Parameters:
                 dir (str): directory to load data from (dependent on load_source)
@@ -37,6 +37,7 @@ class DataModule():
         self.test_size = test_size
         self.load_source = load_source
         self.random_seed = random_seed if random_seed != 0 else np.random.randint(1)
+        self.verbose = verbose
 
         self.scalers = {
             'raw': StandardScaler(),
@@ -49,7 +50,10 @@ class DataModule():
             }
         }
 
-        self.dataset = None
+        self.dataset_train = None
+        self.dataset_val = None
+        self.dataset_test = None
+
         self.output_text_processor = preprocessing.TextVectorization(
             standardize=text_lower_and_start_end,
         )
@@ -85,15 +89,27 @@ class DataModule():
     def save_to_datasets(self, raw_data_split, event_data_split, bases_data_split):
         if self.train_size > 0:
             self.dataset_train = tf.data.Dataset.from_tensor_slices((raw_data_split[0], event_data_split[0], bases_data_split[0])).batch(self.batch_size, drop_remainder=True)
+        else:
+            self.dataset_train = None
         if self.val_size > 0:
             self.dataset_val = tf.data.Dataset.from_tensor_slices((raw_data_split[1], event_data_split[1], bases_data_split[1])).batch(self.batch_size, drop_remainder=True)
+        else:
+            self.dataset_val = None
         if self.test_size > 0:
             self.dataset_test = tf.data.Dataset.from_tensor_slices((raw_data_split[2], event_data_split[2], bases_data_split[2])).batch(self.batch_size, drop_remainder=True)
+        else:
+            self.dataset_test = None
 
     def setup(self):
         raw_samples, event_samples, bases_samples = self.load_data_samples()
         raw_data_split, event_data_split, bases_data_split = self.process_and_split_data_samples(raw_samples, event_samples, bases_samples)
         self.save_to_datasets(raw_data_split, event_data_split, bases_data_split)
+
+        if self.verbose:
+            print('Max bases seq. length: {}'.format(max(map(len, bases_samples))))
+            print('Train samples:\t{}, batches:\t{}'.format(0 if bases_data_split[0] == None else len(bases_data_split[0]), 0 if self.dataset_train == None else tf.data.experimental.cardinality(self.dataset_train).numpy()))
+            print('Val samples:\t{}, batches:\t{}'.format(0 if bases_data_split[1] == None else len(bases_data_split[1]), 0 if self.dataset_val == None else tf.data.experimental.cardinality(self.dataset_val).numpy()))
+            print('Train samples:\t{}, batches:\t{}'.format(0 if bases_data_split[2] == None else len(bases_data_split[2]), 0 if self.dataset_test == None else tf.data.experimental.cardinality(self.dataset_test).numpy()))
 
     def train_val_test_split(self, raw_data, event_data, bases_data, train_size=0.8, val_size=0.1, test_size=0.1):
         raw_train, raw_val, raw_test = utils.train_val_test_split(raw_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
