@@ -274,6 +274,18 @@ class DataModule():
 
         return bases_raw_aligned_data, events_sequence, bases_sequence
 
+    def save_scalers(self, path: str):
+        """Save scalers as pickle to file in path
+        """
+        with open(path, 'wb') as scalers_file:
+            pickle.dump(self.scalers, scalers_file)
+
+    def load_scalers(self, path: str):
+        """Load scalers from file pickle in path
+        """
+        with open(path, 'rb') as scalers_file:
+            self.scalers = pickle.load(scalers_file)
+
     ### chiron load source processing
 
     def _load_all_chiron_data_samples_from_dir(self, dir, max_files=None):
