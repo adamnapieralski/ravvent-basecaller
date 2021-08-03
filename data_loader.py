@@ -68,7 +68,7 @@ class DataModule():
             raw_aligned_data, events_sequence, bases_sequence = self._load_simulator_data(self.dir)
             raw_samples, event_samples, bases_samples = zip(*self.samples_generator(raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
         elif self.load_source == 'chiron':
-            raw_samples, event_samples, bases_samples = self._load_all_chiron_data_samples_from_dir(self.dir, 100)
+            raw_samples, event_samples, bases_samples = self._load_all_chiron_data_samples_from_dir(self.dir)
 
         return raw_samples, event_samples, bases_samples
 
@@ -288,12 +288,17 @@ class DataModule():
 
     ### chiron load source processing
 
-    def _load_all_chiron_data_samples_from_dir(self, dir, max_files=None):
+    def _load_all_chiron_data_samples_from_dir(self, dir, substring_match=None, max_files=None):
         dir = Path(dir)
         signals_paths = [p for p in dir.iterdir() if p.suffix == '.signal']
         signals_paths.sort()
         labels_paths = [p for p in dir.iterdir() if p.suffix == '.label']
         labels_paths.sort()
+
+        if substring_match is not None:
+            signals_paths = [p for p in signals_paths if substring_match in p.stem]
+            labels_paths = [p for p in labels_paths if substring_match in p.stem]
+
         if max_files is not None:
             signals_paths = signals_paths[0:max_files]
             labels_paths = labels_paths[0:max_files]
