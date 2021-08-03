@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import pickle
+import json
 
 from tensorflow.keras.layers.experimental import preprocessing
 from tensorflow.keras.preprocessing.sequence import pad_sequences
@@ -381,3 +382,70 @@ def text_lower_and_start_end(text):
     text = tf.strings.lower(text)
     text = tf.strings.join(['[START]', text, '[END]'], separator=' ')
     return text
+
+
+class DataGenerator(tf.keras.utils.Sequence):
+    def __init__(self, files_info_path, batch_size=64, shuffle=True):
+        """
+        file_info_path (str): json file including array of pickle data files and number of samples in them (format: [{'path', 'samples'},])
+        batch_size (int): batch size
+        shuffle (bool): should files and batches inside them be shuffled between epochs
+        """
+        self.batch_size = batch_size
+        self.files_info_path = files_info_path
+        self.shuffle = shuffle
+        self.fetch_ids = None
+        self.read_file = None
+
+        self.last_file_id = None
+        self.files_info = None
+
+        with open(self.files_info_path, 'rb') as fi:
+            self.files_info = json.load(fi)
+
+        self.on_epoch_end()
+
+    def _compute_new_fetch_ids(self):
+        files_ids = np.arange(len(self.files_info))
+
+        if self.shuffle:
+            np.random.shuffle(files_ids)
+
+        fetch_ids = []
+        for f_id in files_ids:
+            samples = self.files_info[f_id]['samples']
+            batches_num = samples // self.batch_size
+            start_ids = np.arange(0, self.batch_size * batches_num, self.batch_size)
+
+            if self.shuffle:
+                np.random.shuffle(start_ids)
+
+            fetch_ids.extend(
+                [(f_id, sid, sid+self.batch_size) for sid in start_ids]
+            )
+        return np.array(fetch_ids, dtype='int')
+
+    def __getitem__(self, index):
+        """Generate one batch of data
+        """
+
+        # if fetched file id changes
+        if self.fetch_ids[index][0] != self.last_file_id:
+            with open(self.files_info[self.fetch_ids[index][0]]['path'], 'rb') as f:
+                self.read_file = pickle.load(f)
+            self.last_file_id = self.fetch_ids[index][0]
+
+        return (
+            self.read_file[0][self.fetch_ids[index][1]:self.fetch_ids[index][2]], # raw
+            self.read_file[1][self.fetch_ids[index][1]:self.fetch_ids[index][2]], # event
+            self.read_file[2][self.fetch_ids[index][1]:self.fetch_ids[index][2]] # bases
+        )
+
+    def __len__(self):
+        return len(self.fetch_ids)
+
+    def on_epoch_end(self):
+        """Updates indexes after each epoch
+        """
+        if self.shuffle:
+            self.fetch_ids = self._compute_new_fetch_ids()
