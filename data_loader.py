@@ -336,6 +336,7 @@ class DataModule():
 
         random_state = self.random_seed
         max_lens = []
+        files_info = [] # for use in DataGenerator
 
         for signal_path, label_path in zip(signals_paths, labels_paths):
             bases_raw_aligned_data, events_sequence, bases_sequence = self._load_chiron_single_data(signal_path, label_path)
@@ -357,11 +358,21 @@ class DataModule():
 
             random_state += 1
 
-            with open(samples_dir / f'{signal_path.stem}.pkl', 'wb') as f:
+            dat_file_path = samples_dir / f'{signal_path.stem}.pkl'
+
+            with open(dat_file_path, 'wb') as f:
                 pickle.dump((raw_samples, event_samples, bases_samples), f, protocol=pickle.HIGHEST_PROTOCOL)
 
+            files_info.append({
+                'path': dat_file_path.as_posix(),
+                'samples': len(raw_samples[0])
+            })
+
         if self.verbose:
-            print('Max len: {}'.format(max(max_lens)))
+            print('Total bases seq. max len: {}'.format(max(max_lens)))
+
+        with open(samples_dir / 'files_info.json', 'wt') as fi:
+            json.dump(files_info, fi, indent=2)
 
     def transform_and_replace_chiron_saved_samples(self, samples_dir):
         samples_dir = Path(samples_dir)
