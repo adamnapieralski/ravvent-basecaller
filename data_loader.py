@@ -80,7 +80,8 @@ class DataModule():
         # scaling
         if raw_data_split[0] is not None and event_data_split[0] is not None:
             self.fit_scalers(raw_data_split[0], event_data_split[0])
-        raw_data_split, self.event_data_split = self.scale_input_data(raw_data_split, event_data_split)
+
+        raw_data_split, event_data_split = self.scale_input_data(raw_data_split, event_data_split)
 
         bases_data_split = self.prepare_bases_data(bases_data_split)
 
@@ -130,20 +131,22 @@ class DataModule():
 
     def scale_input_data(self, raw_data_split, event_data_split):
         raw_scaled = []
-        for raw in raw_data_split:
-            if raw is None:
+        for raw_it in raw_data_split:
+            if raw_it is None:
                 raw_scaled.append(None)
                 continue
+            raw = np.copy(raw_it)
             raw_no_pad = raw[raw != self.input_padding_value]
             raw_no_pad_scaled = self.scalers['raw'].transform(raw_no_pad.reshape(-1, 1))
             raw[raw != self.input_padding_value] = raw_no_pad_scaled.flatten()
             raw_scaled.append(raw)
 
         event_scaled = []
-        for event in event_data_split:
-            if event is None:
+        for event_it in event_data_split:
+            if event_it is None:
                 event_scaled.append(None)
                 continue
+            event = np.copy(event_it)
             for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
                 feat_vals = event[:,:,id]
                 feat_vals_no_pad = feat_vals[feat_vals != self.input_padding_value]
