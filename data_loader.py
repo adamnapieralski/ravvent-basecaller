@@ -61,8 +61,6 @@ class DataModule():
 
         self.input_padding_value = INPUT_MASK
 
-        self.setup()
-
     def load_data_samples(self):
         if self.load_source == 'simulator':
             raw_aligned_data, events_sequence, bases_sequence = self._load_simulator_data(self.dir)

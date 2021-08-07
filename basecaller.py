@@ -9,23 +9,32 @@ from typing import Any, Tuple
 import utils
 
 class Encoder(tf.keras.layers.Layer):
-    def __init__(self, enc_units: int, data_type: str):
+    def __init__(self, enc_units: int, data_type: str, rnn_type: str = 'gru'):
         '''
         Initialize encoder
             Parameters:
                 enc_units (int): Number of encoder inner units (latent dim)
                 data_type (str): Type of encoder regarding input data - allowed values: "raw", "event"
+                rnn_type (str): Type of RNN layer - allowed values: "gru", "lstm"
         '''
         super(Encoder, self).__init__()
         self.enc_units = enc_units
         self.data_type = data_type
+        self.rnn_type = rnn_type
 
         # The GRU RNN layer processes those vectors sequentially.
-        self.gru = tf.keras.layers.GRU(self.enc_units,
-                                    # Return the sequence and state
-                                    return_sequences=True,
-                                    return_state=True,
-                                    recurrent_initializer='glorot_uniform')
+        if self.rnn_type == 'gru':
+            self.rnn = tf.keras.layers.GRU(self.enc_units,
+                                        # Return the sequence and state
+                                        return_sequences=True,
+                                        return_state=True,
+                                        recurrent_initializer='glorot_uniform')
+        elif self.rnn_type == 'lstm':
+            self.rnn = tf.keras.layers.LSTM(self.enc_units,
+                            # Return the sequence and state
+                            return_sequences=True,
+                            return_state=True,
+                            recurrent_initializer='glorot_uniform')
 
     def call(self, sequence, state=None):
         shape_checker = ShapeChecker()
@@ -37,9 +46,13 @@ class Encoder(tf.keras.layers.Layer):
         # 2. The GRU processes the embedding sequence.
         #    output shape: (batch, s, enc_units)
         #    state shape: (batch, enc_units)
-        output, state = self.gru(sequence, initial_state=state)
+        if self.rnn_type == 'gru':
+            output, state = self.rnn(sequence, initial_state=state)
+            shape_checker(state, ('batch', 'enc_units'))
+        elif self.rnn_type == 'lstm':
+            output, state_h, state_c = self.rnn(sequence, initial_state=state)
+            state = [state_h, state_c]
         shape_checker(output, ('batch', 's', 'enc_units'))
-        shape_checker(state, ('batch', 'enc_units'))
 
         # 3. Returns the new sequence and its state.
         return output, state
@@ -95,21 +108,28 @@ class DecoderOutput(typing.NamedTuple):
 
 
 class Decoder(tf.keras.layers.Layer):
-    def __init__(self, output_vocab_size, dec_units, enc_units):
+    def __init__(self, output_vocab_size, dec_units, enc_units, rnn_type: str = 'gru'):
         super(Decoder, self).__init__()
+        self.output_vocab_size = output_vocab_size
         self.dec_units = dec_units
         self.enc_units = enc_units
-        self.output_vocab_size = output_vocab_size
+        self.rnn_type = rnn_type
         self.embedding_dim = 1 # constant
 
         # For Step 1. The embedding layer convets token IDs to vectors
         self.embedding = tf.keras.layers.Embedding(self.output_vocab_size, self.embedding_dim)
 
         # For Step 2. The RNN keeps track of what's been generated so far.
-        self.gru = tf.keras.layers.GRU(self.dec_units,
-                                        return_sequences=True,
-                                        return_state=True,
-                                        recurrent_initializer='glorot_uniform')
+        if self.rnn_type == 'gru':
+            self.rnn = tf.keras.layers.GRU(self.dec_units,
+                                            return_sequences=True,
+                                            return_state=True,
+                                            recurrent_initializer='glorot_uniform')
+        elif self.rnn_type == 'lstm':
+            self.rnn = tf.keras.layers.LSTM(self.dec_units,
+                                            return_sequences=True,
+                                            return_state=True,
+                                            recurrent_initializer='glorot_uniform')
 
         # For step 3. The RNN output will be the query for the attention layer.
         self.attention = BahdanauAttention(self.dec_units, self.enc_units)
@@ -136,10 +156,14 @@ class Decoder(tf.keras.layers.Layer):
         shape_checker(vectors, ('batch', 't', 'embedding_dim'))
 
         # Step 2. Process one step with the RNN
-        rnn_output, state = self.gru(vectors, initial_state=state)
+        if self.rnn_type == 'gru':
+            rnn_output, state = self.rnn(vectors, initial_state=state)
+            shape_checker(state, ('batch', 'dec_units'))
+        elif self.rnn_type == 'lstm':
+            rnn_output, state_h, state_c = self.rnn(vectors, initial_state=state)
+            state = [state_h, state_c]
 
         shape_checker(rnn_output, ('batch', 't', 'dec_units'))
-        shape_checker(state, ('batch', 'dec_units'))
 
         # Step 3. Use the RNN output as the query for the attention over the
         # encoder output.
@@ -165,15 +189,15 @@ class Decoder(tf.keras.layers.Layer):
 
 
 class Basecaller(tf.keras.Model):
-    def __init__(self, units: int, output_text_processor, input_data_type: str, input_padding_value, teacher_forcing: bool = True, val_teacher_forcing: bool = False):
+    def __init__(self, units: int, output_text_processor, input_data_type: str, input_padding_value, rnn_type: str = 'gru', teacher_forcing: bool = True, val_teacher_forcing: bool = False):
         super().__init__()
         # Build the encoder and decoder
-        encoder_raw = Encoder(units, 'raw')
-        encoder_event = Encoder(units, 'event')
+        encoder_raw = Encoder(units, 'raw', rnn_type=rnn_type)
+        encoder_event = Encoder(units, 'event', rnn_type=rnn_type)
         if input_data_type == 'joint':
-            decoder = Decoder(output_text_processor.vocabulary_size(), 2 * units, units)
+            decoder = Decoder(output_text_processor.vocabulary_size(), 2 * units, units, rnn_type=rnn_type)
         else:
-            decoder = Decoder(output_text_processor.vocabulary_size(), units, units)
+            decoder = Decoder(output_text_processor.vocabulary_size(), units, units, rnn_type=rnn_type)
 
         self.encoder_raw = encoder_raw
         self.encoder_event = encoder_event
@@ -181,6 +205,7 @@ class Basecaller(tf.keras.Model):
         self.output_text_processor = output_text_processor
         self.input_data_type = input_data_type
         self.input_padding_value = input_padding_value
+        self.rnn_type = rnn_type
         self.teacher_forcing = teacher_forcing
         self.val_teacher_forcing = val_teacher_forcing # on validation dataset
         self.shape_checker = ShapeChecker()

@@ -1,6 +1,9 @@
+import numpy as np
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle as sklearn_shuffle
+
+from pathlib import Path
 
 from shape_checker import ShapeChecker
 
@@ -59,6 +62,20 @@ def train_val_test_split(data, train_size=0.8, val_size=0.1, test_size=0.1, rand
         return None, val, test
     if train_size == 1:
         return data_sh, None, None
+
+def get_bases_sequence_from_chiron_dir(dir: str, max_length: int = None):
+    dir = Path(dir)
+    labels_paths = [p for p in dir.iterdir() if p.suffix == '.label']
+    labels_paths.sort()
+
+    bases_sequence = ''
+
+    for label_path in labels_paths:
+        labels = np.loadtxt(label_path, dtype='object')
+        single_seq = labels[:,2]
+        bases_sequence += ''.join(single_seq.tolist())
+
+    return bases_sequence
 
 class BatchLogs(tf.keras.callbacks.Callback):
     def __init__(self, key):
