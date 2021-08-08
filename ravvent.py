@@ -24,6 +24,7 @@ DATA_PATH = 'data/chiron/train'
 BASES_OFFSET = 1
 TEACHER_FORCING = False
 RNN_TYPE = 'gru'
+LOAD_SOURCE = 'chiron'
 
 RANDOM_SEED = 22
 
@@ -32,7 +33,7 @@ if DATA_TYPE == 'joint':
 else:
     NAME_MAX_LEN = f'rawmax{RAW_MAX_LEN}' if DATA_TYPE == 'raw' else f'evmax{EVENT_MAX_LEN}'
 
-NAME_SPEC = f'{DATA_TYPE}.{RNN_TYPE}.u{UNITS}.{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}.tf{int(TEACHER_FORCING)}'
+NAME_SPEC = f'{DATA_TYPE}.{RNN_TYPE}.u{UNITS}.{LOAD_SOURCE}.{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}.tf{int(TEACHER_FORCING)}'
 
 
 tf.random.set_seed(RANDOM_SEED)
@@ -48,7 +49,7 @@ if __name__ == '__main__':
         train_size=1,
         val_size=0,
         test_size=0,
-        load_source='chiron',
+        load_source=LOAD_SOURCE,
         random_seed=RANDOM_SEED,
         verbose=True
     )
