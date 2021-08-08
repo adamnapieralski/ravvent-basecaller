@@ -9,32 +9,50 @@ from typing import Any, Tuple
 import utils
 
 class Encoder(tf.keras.layers.Layer):
-    def __init__(self, enc_units: int, data_type: str, rnn_type: str = 'gru'):
+    def __init__(self, enc_units: int, data_type: str, rnn_type: str = 'gru', bidir_merge_mode: str = 'sum'):
         '''
         Initialize encoder
             Parameters:
                 enc_units (int): Number of encoder inner units (latent dim)
                 data_type (str): Type of encoder regarding input data - allowed values: "raw", "event"
-                rnn_type (str): Type of RNN layer - allowed values: "gru", "lstm"
+                rnn_type (str): Type of RNN layer - allowed values: "gru", "lstm", "bigru", "bilstm"
+                bidir_merge_mode (str): For bidirectional rnn_types, merge output mode - allowed values: "sum", "mul", "concat", "ave", None
         '''
         super(Encoder, self).__init__()
         self.enc_units = enc_units
         self.data_type = data_type
         self.rnn_type = rnn_type
+        self.bidir_merge_mode = bidir_merge_mode
 
         # The GRU RNN layer processes those vectors sequentially.
         if self.rnn_type == 'gru':
             self.rnn = tf.keras.layers.GRU(self.enc_units,
-                                        # Return the sequence and state
                                         return_sequences=True,
                                         return_state=True,
                                         recurrent_initializer='glorot_uniform')
         elif self.rnn_type == 'lstm':
             self.rnn = tf.keras.layers.LSTM(self.enc_units,
-                            # Return the sequence and state
                             return_sequences=True,
                             return_state=True,
                             recurrent_initializer='glorot_uniform')
+        elif self.rnn_type == 'bigru':
+            self.uni_rnn = tf.keras.layers.GRU(self.enc_units,
+                                        return_sequences=True,
+                                        return_state=True,
+                                        recurrent_initializer='glorot_uniform')
+            self.rnn = tf.keras.layers.Bidirectional(
+                layer=self.uni_rnn,
+                merge_mode=self.bidir_merge_mode
+            )
+        elif self.rnn_type == 'bilstm':
+            self.uni_rnn = tf.keras.layers.LSTM(self.enc_units,
+                            return_sequences=True,
+                            return_state=True,
+                            recurrent_initializer='glorot_uniform')
+            self.rnn = tf.keras.layers.Bidirectional(
+                layer=self.uni_rnn,
+                merge_mode=self.bidir_merge_mode
+            )
 
     def call(self, sequence, state=None):
         shape_checker = ShapeChecker()
@@ -52,6 +70,12 @@ class Encoder(tf.keras.layers.Layer):
         elif self.rnn_type == 'lstm':
             output, state_h, state_c = self.rnn(sequence, initial_state=state)
             state = [state_h, state_c]
+        elif self.rnn_type == 'bigru':
+            output, state_f, state_b = self.rnn(sequence, initial_state=state)
+            state = [state_f, state_b]
+        elif self.rnn_type == 'bilstm':
+            output, state_f_h, state_f_c, state_b_h, state_b_c = self.rnn(sequence, initial_state=state)
+            state = [state_f_h, state_f_c, state_b_h, state_b_c]
         shape_checker(output, ('batch', 's', 'enc_units'))
 
         # 3. Returns the new sequence and its state.
@@ -108,12 +132,13 @@ class DecoderOutput(typing.NamedTuple):
 
 
 class Decoder(tf.keras.layers.Layer):
-    def __init__(self, output_vocab_size, dec_units, enc_units, rnn_type: str = 'gru'):
+    def __init__(self, output_vocab_size, dec_units, enc_units, rnn_type: str = 'gru', bidir_merge_mode: str = 'sum'):
         super(Decoder, self).__init__()
         self.output_vocab_size = output_vocab_size
         self.dec_units = dec_units
         self.enc_units = enc_units
         self.rnn_type = rnn_type
+        self.bidir_merge_mode = bidir_merge_mode
         self.embedding_dim = 1 # constant
 
         # For Step 1. The embedding layer convets token IDs to vectors
@@ -130,6 +155,24 @@ class Decoder(tf.keras.layers.Layer):
                                             return_sequences=True,
                                             return_state=True,
                                             recurrent_initializer='glorot_uniform')
+        elif self.rnn_type == 'bigru':
+            self.uni_rnn = tf.keras.layers.GRU(self.enc_units,
+                                        return_sequences=True,
+                                        return_state=True,
+                                        recurrent_initializer='glorot_uniform')
+            self.rnn = tf.keras.layers.Bidirectional(
+                layer=self.uni_rnn,
+                merge_mode=self.bidir_merge_mode
+            )
+        elif self.rnn_type == 'bilstm':
+            self.uni_rnn = tf.keras.layers.LSTM(self.enc_units,
+                            return_sequences=True,
+                            return_state=True,
+                            recurrent_initializer='glorot_uniform')
+            self.rnn = tf.keras.layers.Bidirectional(
+                layer=self.uni_rnn,
+                merge_mode=self.bidir_merge_mode
+            )
 
         # For step 3. The RNN output will be the query for the attention layer.
         self.attention = BahdanauAttention(self.dec_units, self.enc_units)
@@ -162,6 +205,12 @@ class Decoder(tf.keras.layers.Layer):
         elif self.rnn_type == 'lstm':
             rnn_output, state_h, state_c = self.rnn(vectors, initial_state=state)
             state = [state_h, state_c]
+        elif self.rnn_type == 'bigru':
+            rnn_output, state_f, state_b = self.rnn(vectors, initial_state=state)
+            state = [state_f, state_b]
+        elif self.rnn_type == 'bilstm':
+            rnn_output, state_f_h, state_f_c, state_b_h, state_b_c = self.rnn(vectors, initial_state=state)
+            state = [state_f_h, state_f_c, state_b_h, state_b_c]
 
         shape_checker(rnn_output, ('batch', 't', 'dec_units'))
 
