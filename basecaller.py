@@ -156,7 +156,7 @@ class Decoder(tf.keras.layers.Layer):
                                             return_state=True,
                                             recurrent_initializer='glorot_uniform')
         elif self.rnn_type == 'bigru':
-            self.uni_rnn = tf.keras.layers.GRU(self.enc_units,
+            self.uni_rnn = tf.keras.layers.GRU(self.dec_units,
                                         return_sequences=True,
                                         return_state=True,
                                         recurrent_initializer='glorot_uniform')
@@ -165,7 +165,7 @@ class Decoder(tf.keras.layers.Layer):
                 merge_mode=self.bidir_merge_mode
             )
         elif self.rnn_type == 'bilstm':
-            self.uni_rnn = tf.keras.layers.LSTM(self.enc_units,
+            self.uni_rnn = tf.keras.layers.LSTM(self.dec_units,
                             return_sequences=True,
                             return_state=True,
                             recurrent_initializer='glorot_uniform')
@@ -191,8 +191,8 @@ class Decoder(tf.keras.layers.Layer):
         shape_checker(inputs.new_tokens, ('batch', 't'))
         shape_checker(inputs.enc_output, ('batch', 's', 'enc_units'))
         shape_checker(inputs.mask, ('batch', 's'))
-        if state is not None:
-            shape_checker(state, ('batch', 'dec_units'))
+        # if state is not None:
+        #     shape_checker(state, ('batch', 'dec_units'))
 
         # Step 1. Lookup the embeddings
         vectors = self.embedding(inputs.new_tokens)
@@ -216,7 +216,6 @@ class Decoder(tf.keras.layers.Layer):
 
         # Step 3. Use the RNN output as the query for the attention over the
         # encoder output.
-        # print(rnn_output, inputs.enc_output, inputs.mask)
         context_vector, attention_weights = self.attention(
             query=rnn_output, value=inputs.enc_output, mask=inputs.mask)
         # shape_checker(context_vector, ('batch', 't', 'dec_units'))
@@ -289,13 +288,10 @@ class Basecaller(tf.keras.Model):
     def _preprocess(self, input_data, target_sequence):
         if self.input_data_type == 'joint':
             (raw_input, event_input) = input_data
-            self.shape_checker(raw_input, ('batch', 's', None))
-            self.shape_checker(event_input, ('batch', 's', None))
             input_mask_raw = utils.input_mask(raw_input, self.input_padding_value)
             input_mask_event = utils.input_mask(event_input, self.input_padding_value)
             input_mask = tf.concat((input_mask_raw, input_mask_event), axis=-1)
         else:
-            self.shape_checker(input_data, ('batch', 's', None))
             input_mask = utils.input_mask(input_data, self.input_padding_value)
 
         # Convert the text to token IDs
@@ -323,22 +319,29 @@ class Basecaller(tf.keras.Model):
 
                 enc_output_raw, enc_state_raw = self.encoder_raw(raw_input)
                 self.shape_checker(enc_output_raw, ('batch', 's', 'enc_units'))
-                self.shape_checker(enc_state_raw, ('batch', 'enc_units'))
+                # self.shape_checker(enc_state_raw, ('batch', 'enc_units')) # state can be list for e.g. lstm
 
                 enc_output_event, enc_state_event = self.encoder_event(event_input)
 
                 enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
-                enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
+
+                # when state is a list of different states (like in lstm or bidirectional rnns)
+                if len(tf.shape(enc_state_raw)) == 3:
+                    enc_state = []
+                    for st_raw, st_event in zip(enc_state_raw, enc_state_event):
+                        enc_state.append(tf.concat((st_raw, st_event), axis=1))
+                else:
+                    enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
 
             elif self.input_data_type == 'raw':
                 enc_output, enc_state= self.encoder_raw(input_data)
                 self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
-                self.shape_checker(enc_state, ('batch', 'enc_units'))
+                # self.shape_checker(enc_state, ('batch', 'enc_units'))
 
             elif self.input_data_type == 'event':
-                enc_output, enc_state= self.encoder_event(input_data)
+                enc_output, enc_state = self.encoder_event(input_data)
                 self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
-                self.shape_checker(enc_state, ('batch', 'enc_units'))
+                # self.shape_checker(enc_state, ('batch', 'enc_units'))
 
             # Initialize the decoder's state to the encoder's final state.
             # This only works if the encoder and decoder have the same number of
@@ -384,8 +387,8 @@ class Basecaller(tf.keras.Model):
 
         dec_result, dec_state = self.decoder(decoder_input, state=dec_state)
         self.shape_checker(dec_result.logits, ('batch', 't1', 'logits'))
-        self.shape_checker(dec_result.attention_weights, ('batch', 't1', 's'))
-        self.shape_checker(dec_state, ('batch', 'dec_units'))
+        # self.shape_checker(dec_result.attention_weights, ('batch', 't1', 's'))
+        # self.shape_checker(dec_state, ('batch', 'dec_units'))
 
         # `self.loss` returns the total for non-padded tokens
         y = target_pred_tokens
@@ -413,12 +416,19 @@ class Basecaller(tf.keras.Model):
 
             enc_output_raw, enc_state_raw = self.encoder_raw(raw_input)
             self.shape_checker(enc_output_raw, ('batch', 's', 'enc_units'))
-            self.shape_checker(enc_state_raw, ('batch', 'enc_units'))
+            # self.shape_checker(enc_state_raw, ('batch', 'enc_units'))
 
             enc_output_event, enc_state_event = self.encoder_event(event_input)
 
             enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
-            enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
+
+            # when state is a list of different states (like in lstm or bidirectional rnns)
+            if len(tf.shape(enc_state_raw)) == 3:
+                enc_state = []
+                for st_raw, st_event in zip(enc_state_raw, enc_state_event):
+                    enc_state.append(tf.concat((st_raw, st_event), axis=1))
+            else:
+                enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
 
             batch_size = tf.shape(raw_input)[0]
 
@@ -519,7 +529,15 @@ class Basecaller(tf.keras.Model):
             (raw_input, event_input) = input_data
             enc_output_raw, enc_state_raw = self.encoder_raw(raw_input)
             enc_output_event, enc_state_event = self.encoder_event(event_input)
-            enc_output, enc_state = tf.concat((enc_output_raw, enc_output_event), axis=1), tf.concat((enc_state_raw, enc_state_event), axis=1)
+            enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
+
+            # when state is a list of different states (like in lstm or bidirectional rnns)
+            if len(tf.shape(enc_state_raw)) == 3:
+                enc_state = []
+                for st_raw, st_event in zip(enc_state_raw, enc_state_event):
+                    enc_state.append(tf.concat((st_raw, st_event), axis=1))
+            else:
+                enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
 
             input_mask_raw = utils.input_mask(raw_input, self.input_padding_value)
             input_mask_event = utils.input_mask(event_input, self.input_padding_value)

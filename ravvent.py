@@ -61,14 +61,14 @@ if __name__ == '__main__':
     dm.setup()
     val_ds, test_ds = dm.dataset_val, dm.dataset_test
 
-    ## simulator
+    # # simulator
     # dm = DataModule(
     #     dir=DATA_PATH,
     #     max_raw_length=RAW_MAX_LEN,
     #     max_event_length=EVENT_MAX_LEN,
     #     bases_offset=BASES_OFFSET,
     #     batch_size=BATCH_SIZE,
-    #     load_source='simulator',
+    #     load_source=LOAD_SOURCE,
     #     random_seed=RANDOM_SEED,
     #     verbose=True
     # )
