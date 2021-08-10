@@ -83,12 +83,11 @@ class Encoder(tf.keras.layers.Layer):
 
 
 class BahdanauAttention(tf.keras.layers.Layer):
-    def __init__(self, units_dec, units_enc):
+    def __init__(self, units):
         super().__init__()
         # For Eqn. (4), the  Bahdanau attention
-        # TODO same units, lost details on query (dec rnn output)
-        self.W1 = tf.keras.layers.Dense(units_enc, use_bias=False)
-        self.W2 = tf.keras.layers.Dense(units_enc, use_bias=False)
+        self.W1 = tf.keras.layers.Dense(units, use_bias=False)
+        self.W2 = tf.keras.layers.Dense(units, use_bias=False)
 
         self.attention = tf.keras.layers.AdditiveAttention()
 
@@ -103,14 +102,14 @@ class BahdanauAttention(tf.keras.layers.Layer):
         # shape_checker(w1_query, ('batch', 't', 'attn_units'))
 
         # From Eqn. (4), `W2@hs`.
-        w2_key = self.W2(value)
+        w2_value = self.W2(value)
         # shape_checker(w2_key, ('batch', 's', 'attn_units'))
 
 
         query_mask = tf.ones(tf.shape(query)[:-1], dtype=bool)
         value_mask = mask
         context_vector, attention_weights = self.attention(
-            inputs = [w1_query, value, w2_key],
+            inputs = [w1_query, w2_value],
             mask=[query_mask, value_mask],
             return_attention_scores = True,
         )
@@ -175,7 +174,7 @@ class Decoder(tf.keras.layers.Layer):
             )
 
         # For step 3. The RNN output will be the query for the attention layer.
-        self.attention = BahdanauAttention(self.dec_units, self.enc_units)
+        self.attention = BahdanauAttention(self.dec_units)
 
         # For step 4. Eqn. (3): converting `ct` to `at`
         self.Wc = tf.keras.layers.Dense(dec_units, activation=tf.math.tanh,
