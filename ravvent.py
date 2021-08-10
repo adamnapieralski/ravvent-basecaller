@@ -23,8 +23,7 @@ PATIENCE = 50
 DATA_PATH = 'data/chiron/train'
 BASES_OFFSET = 1
 TEACHER_FORCING = False
-RNN_TYPE = 'gru'
-LOAD_SOURCE = 'chiron'
+ATTENTION_TYPE = 'bahdanau' # 'luong'
 
 RANDOM_SEED = 22
 
@@ -81,7 +80,8 @@ if __name__ == '__main__':
         input_data_type=DATA_TYPE,
         input_padding_value=dm.input_padding_value,
         rnn_type=RNN_TYPE,
-        teacher_forcing=TEACHER_FORCING
+        teacher_forcing=TEACHER_FORCING,
+        attention_type=ATTENTION_TYPE
     )
 
     # Configure the loss and optimizer

@@ -118,6 +118,32 @@ class BahdanauAttention(tf.keras.layers.Layer):
 
         return context_vector, attention_weights
 
+class LuongAttention(tf.keras.layers.Layer):
+    def __init__(self, units):
+        super().__init__()
+        self.W = tf.keras.layers.Dense(units, use_bias=False)
+        self.attention = tf.keras.layers.Attention()
+
+    def call(self, query, value, mask):
+        shape_checker = ShapeChecker()
+        shape_checker(query, ('batch', 't', 'query_units'))
+        shape_checker(value, ('batch', 's', 'value_units'))
+        shape_checker(mask, ('batch', 's'))
+
+        # From Eqn. (4), `W@hs`.
+        w_value = self.W(value)
+
+        query_mask = tf.ones(tf.shape(query)[:-1], dtype=bool)
+        value_mask = mask
+        context_vector, attention_weights = self.attention(
+            inputs = [query, w_value],
+            mask=[query_mask, value_mask],
+            return_attention_scores = True,
+        )
+        shape_checker(context_vector, ('batch', 't', 'value_units'))
+        shape_checker(attention_weights, ('batch', 't', 's'))
+
+        return context_vector, attention_weights
 
 class DecoderInput(typing.NamedTuple):
     new_tokens: Any
@@ -131,13 +157,14 @@ class DecoderOutput(typing.NamedTuple):
 
 
 class Decoder(tf.keras.layers.Layer):
-    def __init__(self, output_vocab_size, dec_units, enc_units, rnn_type: str = 'gru', bidir_merge_mode: str = 'sum'):
+    def __init__(self, output_vocab_size, dec_units, enc_units, rnn_type: str = 'gru', bidir_merge_mode: str = 'sum', attention_type: str = 'bahdanau'):
         super(Decoder, self).__init__()
         self.output_vocab_size = output_vocab_size
         self.dec_units = dec_units
         self.enc_units = enc_units
         self.rnn_type = rnn_type
         self.bidir_merge_mode = bidir_merge_mode
+        self.attention_type = attention_type
         self.embedding_dim = 1 # constant
 
         # For Step 1. The embedding layer convets token IDs to vectors
@@ -174,7 +201,10 @@ class Decoder(tf.keras.layers.Layer):
             )
 
         # For step 3. The RNN output will be the query for the attention layer.
-        self.attention = BahdanauAttention(self.dec_units)
+        if self.attention_type == 'bahdanau':
+            self.attention = BahdanauAttention(self.dec_units)
+        elif self.attention_type == 'luong':
+            self.attention = LuongAttention(self.dec_units)
 
         # For step 4. Eqn. (3): converting `ct` to `at`
         self.Wc = tf.keras.layers.Dense(dec_units, activation=tf.math.tanh,
@@ -240,15 +270,27 @@ class Basecaller(tf.keras.Model):
     ## INITIALIZATION
     ##
 
-    def __init__(self, units: int, output_text_processor, input_data_type: str, input_padding_value, rnn_type: str = 'gru', teacher_forcing: bool = True, val_teacher_forcing: bool = False):
+    def __init__(self, units: int, output_text_processor, input_data_type: str, input_padding_value, rnn_type: str = 'gru', teacher_forcing: bool = True, val_teacher_forcing: bool = False, attention_type: str = 'bahdanau'):
+        """Initialize
+
+        Args:
+            units (int): Number of units (encoders and decoder)
+            output_text_processor ([type]): From DataLoader
+            input_data_type (str): {'raw', 'event', 'joint'}
+            input_padding_value ([type]): From DataLoader
+            rnn_type (str, optional): Type of RNN to use, {'gru', 'lstm', 'bigru', 'bilstm'}. Defaults to 'gru'.
+            teacher_forcing (bool, optional): If use teacher forcing during training. Defaults to True.
+            val_teacher_forcing (bool, optional): If use teacher forcing on validation. Defaults to False.
+            attention_type (str, optional): {'bahdanau', 'luong'}. Defaults to 'bahdanau'.
+        """
         super().__init__()
         # Build the encoder and decoder
         encoder_raw = Encoder(units, 'raw', rnn_type=rnn_type)
         encoder_event = Encoder(units, 'event', rnn_type=rnn_type)
         if input_data_type == 'joint':
-            decoder = Decoder(output_text_processor.vocabulary_size(), 2 * units, units, rnn_type=rnn_type)
+            decoder = Decoder(output_text_processor.vocabulary_size(), 2 * units, units, rnn_type=rnn_type, attention_type=attention_type)
         else:
-            decoder = Decoder(output_text_processor.vocabulary_size(), units, units, rnn_type=rnn_type)
+            decoder = Decoder(output_text_processor.vocabulary_size(), units, units, rnn_type=rnn_type, attention_type=attention_type)
 
         self.encoder_raw = encoder_raw
         self.encoder_event = encoder_event
@@ -259,6 +301,7 @@ class Basecaller(tf.keras.Model):
         self.rnn_type = rnn_type
         self.teacher_forcing = teacher_forcing
         self.val_teacher_forcing = val_teacher_forcing # on validation dataset
+        self.attention_type = attention_type
         self.shape_checker = ShapeChecker()
 
         self.output_token_string_from_index = (
