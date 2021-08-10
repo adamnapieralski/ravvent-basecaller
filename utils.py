@@ -74,6 +74,9 @@ def get_bases_sequence_from_chiron_dir(dir: str, max_length: int = None):
         labels = np.loadtxt(label_path, dtype='object')
         single_seq = labels[:,2]
         bases_sequence += ''.join(single_seq.tolist())
+        if max_length is not None and len(bases_sequence) >= max_length:
+            bases_sequence = bases_sequence[0:max_length]
+            break
 
     return bases_sequence
 
