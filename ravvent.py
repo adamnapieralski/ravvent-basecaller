@@ -119,7 +119,7 @@ if __name__ == '__main__':
     mid_2 = timer()
     test_accuracy = basecaller.evaluate_test(test_ds)
     end = timer()
-    print(test_accuracy)
+    print('Test accuracy: {}'.format(test_accuracy))
 
     info['test_accuracy'] = test_accuracy
 

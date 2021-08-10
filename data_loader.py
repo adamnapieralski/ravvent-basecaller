@@ -110,7 +110,7 @@ class DataModule():
             print('Max bases seq. length: {}'.format(max(map(len, bases_samples))))
             print('Train samples:\t{}, batches:\t{}'.format(0 if bases_data_split[0] == None else len(bases_data_split[0]), 0 if self.dataset_train == None else tf.data.experimental.cardinality(self.dataset_train).numpy()))
             print('Val samples:\t{}, batches:\t{}'.format(0 if bases_data_split[1] == None else len(bases_data_split[1]), 0 if self.dataset_val == None else tf.data.experimental.cardinality(self.dataset_val).numpy()))
-            print('Train samples:\t{}, batches:\t{}'.format(0 if bases_data_split[2] == None else len(bases_data_split[2]), 0 if self.dataset_test == None else tf.data.experimental.cardinality(self.dataset_test).numpy()))
+            print('Test samples:\t{}, batches:\t{}'.format(0 if bases_data_split[2] == None else len(bases_data_split[2]), 0 if self.dataset_test == None else tf.data.experimental.cardinality(self.dataset_test).numpy()))
 
     def train_val_test_split(self, raw_data, event_data, bases_data, train_size=0.8, val_size=0.1, test_size=0.1):
         raw_train, raw_val, raw_test = utils.train_val_test_split(raw_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=True)

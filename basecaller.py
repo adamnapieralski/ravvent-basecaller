@@ -299,28 +299,7 @@ class Basecaller(tf.keras.Model):
         max_target_length = tf.shape(target_tokens)[1]
 
         with tf.GradientTape() as tape:
-            # Encode the input
-            if self.input_data_type == 'joint':
-                (raw_input, event_input) = input_data
-
-                enc_output_raw, enc_state_raw = self.encoder_raw(raw_input)
-                self.shape_checker(enc_output_raw, ('batch', 's', 'enc_units'))
-                # self.shape_checker(enc_state_raw, ('batch', 'enc_units')) # state can be list for e.g. lstm
-
-                enc_output_event, enc_state_event = self.encoder_event(event_input)
-
-                enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
-                enc_state = self._prepare_joint_encoder_state(enc_state_raw, enc_state_event)
-
-            elif self.input_data_type == 'raw':
-                enc_output, enc_state= self.encoder_raw(input_data)
-                self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
-                # self.shape_checker(enc_state, ('batch', 'enc_units'))
-
-            elif self.input_data_type == 'event':
-                enc_output, enc_state = self.encoder_event(input_data)
-                self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
-                # self.shape_checker(enc_state, ('batch', 'enc_units'))
+            enc_output, enc_state, _ = self._encode_input(input_data)
 
             # Initialize the decoder's state to the encoder's final state.
             # This only works if the encoder and decoder have the same number of
@@ -375,33 +354,7 @@ class Basecaller(tf.keras.Model):
 
         (input_data, input_mask, target_tokens, target_mask) = self._preprocess(input_data, target_sequence)
 
-        if self.input_data_type == 'joint':
-            (raw_input, event_input) = input_data
-
-            enc_output_raw, enc_state_raw = self.encoder_raw(raw_input)
-            self.shape_checker(enc_output_raw, ('batch', 's', 'enc_units'))
-            # self.shape_checker(enc_state_raw, ('batch', 'enc_units'))
-
-            enc_output_event, enc_state_event = self.encoder_event(event_input)
-
-            enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
-
-            enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
-            enc_state = self._prepare_joint_encoder_state(enc_state_raw, enc_state_event)
-
-            batch_size = tf.shape(raw_input)[0]
-
-        elif self.input_data_type == 'raw':
-            enc_output, enc_state= self.encoder_raw(input_data)
-            self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
-            self.shape_checker(enc_state, ('batch', 'enc_units'))
-            batch_size = tf.shape(input_data)[0]
-
-        elif self.input_data_type == 'event':
-            enc_output, enc_state= self.encoder_event(input_data)
-            self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
-            self.shape_checker(enc_state, ('batch', 'enc_units'))
-            batch_size = tf.shape(input_data)[0]
+        enc_output, enc_state, batch_size = self._encode_input(input_data)
 
         dec_state = enc_state
         val_loss = tf.constant(0.0)
@@ -475,33 +428,7 @@ class Basecaller(tf.keras.Model):
         return pred_tokens
 
     def basecall_batch_to_tokens(self, input_data, *, output_max_length=100, temperature=1.0, early_break=True):
-        # Encode the input
-        if self.input_data_type == 'joint':
-            # input data as (raw, event) tuple
-            (raw_input, event_input) = input_data
-            enc_output_raw, enc_state_raw = self.encoder_raw(raw_input)
-            enc_output_event, enc_state_event = self.encoder_event(event_input)
-
-            enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
-            enc_state = self._prepare_joint_encoder_state(enc_state_raw, enc_state_event)
-
-            input_mask_raw = utils.input_mask(raw_input, self.input_padding_value)
-            input_mask_event = utils.input_mask(event_input, self.input_padding_value)
-            input_mask = tf.concat((input_mask_raw, input_mask_event), axis=-1)
-
-            batch_size = tf.shape(raw_input)[0]
-        else:
-            batch_size = tf.shape(input_data)[0]
-            if self.input_data_type == 'raw':
-                enc_output_raw, enc_state_raw = self.encoder_raw(input_data)
-                enc_output, enc_state = enc_output_raw, enc_state_raw
-
-                input_mask = utils.input_mask(input_data, self.input_padding_value)
-            elif self.input_data_type == 'event':
-                enc_output_event, enc_state_event = self.encoder_event(input_data)
-                enc_output, enc_state = enc_output_event, enc_state_event
-
-                input_mask = utils.input_mask(input_data, self.input_padding_value)
+        enc_output, enc_state, batch_size, input_mask = self._encode_input(input_data, return_mask=True)
 
         # Initialize the decoder
         dec_state = enc_state
@@ -614,13 +541,7 @@ class Basecaller(tf.keras.Model):
     ##
 
     def _preprocess(self, input_data, target_sequence):
-        if self.input_data_type == 'joint':
-            (raw_input, event_input) = input_data
-            input_mask_raw = utils.input_mask(raw_input, self.input_padding_value)
-            input_mask_event = utils.input_mask(event_input, self.input_padding_value)
-            input_mask = tf.concat((input_mask_raw, input_mask_event), axis=-1)
-        else:
-            input_mask = utils.input_mask(input_data, self.input_padding_value)
+        input_mask = self._prepare_input_mask(input_data)
 
         # Convert the text to token IDs
         self.shape_checker(target_sequence, ('batch',))
@@ -674,3 +595,47 @@ class Basecaller(tf.keras.Model):
         else:
             enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
         return enc_state
+
+    def _prepare_input_mask(self, input_data):
+        if self.input_data_type == 'joint':
+            (raw_input, event_input) = input_data
+            input_mask_raw = utils.input_mask(raw_input, self.input_padding_value)
+            input_mask_event = utils.input_mask(event_input, self.input_padding_value)
+            input_mask = tf.concat((input_mask_raw, input_mask_event), axis=-1)
+        else:
+            input_mask = utils.input_mask(input_data, self.input_padding_value)
+
+        return input_mask
+
+    def _encode_input(self, input_data, return_mask=False):
+        if self.input_data_type == 'joint':
+            (raw_input, event_input) = input_data
+
+            enc_output_raw, enc_state_raw = self.encoder_raw(raw_input)
+            self.shape_checker(enc_output_raw, ('batch', 's', 'enc_units'))
+            # self.shape_checker(enc_state_raw, ('batch', 'enc_units'))
+
+            enc_output_event, enc_state_event = self.encoder_event(event_input)
+
+            enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
+            enc_state = self._prepare_joint_encoder_state(enc_state_raw, enc_state_event)
+
+            batch_size = tf.shape(raw_input)[0]
+
+        elif self.input_data_type == 'raw':
+            enc_output, enc_state = self.encoder_raw(input_data)
+            self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
+            # self.shape_checker(enc_state, ('batch', 'enc_units'))
+            batch_size = tf.shape(input_data)[0]
+
+        elif self.input_data_type == 'event':
+            enc_output, enc_state= self.encoder_event(input_data)
+            self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
+            # self.shape_checker(enc_state, ('batch', 'enc_units'))
+            batch_size = tf.shape(input_data)[0]
+
+        if return_mask:
+            input_mask = self._prepare_input_mask(input_data)
+            return enc_output, enc_state, batch_size, input_mask
+
+        return enc_output, enc_state, batch_size
