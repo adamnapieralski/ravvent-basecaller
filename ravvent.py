@@ -23,6 +23,8 @@ PATIENCE = 50
 DATA_PATH = 'data/chiron/train'
 BASES_OFFSET = 1
 TEACHER_FORCING = False
+RNN_TYPE = 'lstm'
+LOAD_SOURCE = 'simulator'
 ATTENTION_TYPE = 'bahdanau' # 'luong'
 
 ADDITIONAL_INFO = None
