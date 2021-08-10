@@ -45,6 +45,7 @@ if ADDITIONAL_INFO is not None:
 tf.random.set_seed(RANDOM_SEED)
 
 if __name__ == '__main__':
+    print(NAME_SPEC)
     # chiron 100
     dm = DataModule(
         dir='data/chiron/train/ecoli_0001_0100',
@@ -134,4 +135,4 @@ if __name__ == '__main__':
     info['test_time'] = end - mid_2
 
     with open(f'info/info.{NAME_SPEC}.json', 'w') as info_file:
-        json.dump(info, info_file)
+        json.dump(info, info_file, indent=2)
