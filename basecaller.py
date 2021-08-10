@@ -310,14 +310,7 @@ class Basecaller(tf.keras.Model):
                 enc_output_event, enc_state_event = self.encoder_event(event_input)
 
                 enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
-
-                # when state is a list of different states (like in lstm or bidirectional rnns)
-                if len(tf.shape(enc_state_raw)) == 3:
-                    enc_state = []
-                    for st_raw, st_event in zip(enc_state_raw, enc_state_event):
-                        enc_state.append(tf.concat((st_raw, st_event), axis=1))
-                else:
-                    enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
+                enc_state = self._prepare_joint_encoder_state(enc_state_raw, enc_state_event)
 
             elif self.input_data_type == 'raw':
                 enc_output, enc_state= self.encoder_raw(input_data)
@@ -393,13 +386,8 @@ class Basecaller(tf.keras.Model):
 
             enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
 
-            # when state is a list of different states (like in lstm or bidirectional rnns)
-            if len(tf.shape(enc_state_raw)) == 3:
-                enc_state = []
-                for st_raw, st_event in zip(enc_state_raw, enc_state_event):
-                    enc_state.append(tf.concat((st_raw, st_event), axis=1))
-            else:
-                enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
+            enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
+            enc_state = self._prepare_joint_encoder_state(enc_state_raw, enc_state_event)
 
             batch_size = tf.shape(raw_input)[0]
 
@@ -493,15 +481,9 @@ class Basecaller(tf.keras.Model):
             (raw_input, event_input) = input_data
             enc_output_raw, enc_state_raw = self.encoder_raw(raw_input)
             enc_output_event, enc_state_event = self.encoder_event(event_input)
-            enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
 
-            # when state is a list of different states (like in lstm or bidirectional rnns)
-            if len(tf.shape(enc_state_raw)) == 3:
-                enc_state = []
-                for st_raw, st_event in zip(enc_state_raw, enc_state_event):
-                    enc_state.append(tf.concat((st_raw, st_event), axis=1))
-            else:
-                enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
+            enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
+            enc_state = self._prepare_joint_encoder_state(enc_state_raw, enc_state_event)
 
             input_mask_raw = utils.input_mask(raw_input, self.input_padding_value)
             input_mask_event = utils.input_mask(event_input, self.input_padding_value)
@@ -630,6 +612,7 @@ class Basecaller(tf.keras.Model):
     ##
     ## GENERAL
     ##
+
     def _preprocess(self, input_data, target_sequence):
         if self.input_data_type == 'joint':
             (raw_input, event_input) = input_data
@@ -681,3 +664,13 @@ class Basecaller(tf.keras.Model):
             pred_tokens = tf.random.categorical(logits / temperature, num_samples=1)
 
         return pred_tokens
+
+    def _prepare_joint_encoder_state(self, enc_state_raw, enc_state_event):
+        # when state is a list of different states (like in lstm or bidirectional rnns)
+        if len(tf.shape(enc_state_raw)) == 3:
+            enc_state = []
+            for st_raw, st_event in zip(enc_state_raw, enc_state_event):
+                enc_state.append(tf.concat((st_raw, st_event), axis=1))
+        else:
+            enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
+        return enc_state
