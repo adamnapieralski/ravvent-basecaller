@@ -1,11 +1,13 @@
 import numpy as np
 import tensorflow as tf
+import pickle
 
 from tensorflow.keras.layers.experimental import preprocessing
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils import shuffle as sklearn_shuffle
 
 from ont_fast5_api.fast5_interface import get_fast5_file
 
@@ -121,11 +123,17 @@ class DataModule():
         event_padded = pad_sequences(event_data, maxlen=self.max_event_length, dtype='float32', padding='post', truncating='post', value=self.input_padding_value)
         return raw_padded, event_padded
 
-    def fit_scalers(self, raw_train, event_train):
-        self.scalers['raw'].fit((raw_train[raw_train != self.input_padding_value]).reshape(-1, 1))
-        for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
-            vals = event_train[:,:,id]
-            self.scalers['event'][feat].fit((vals[vals != self.input_padding_value]).reshape(-1, 1))
+    def fit_scalers(self, raw_train, event_train, partial=False):
+        if partial:
+            self.scalers['raw'].partial_fit((raw_train[raw_train != self.input_padding_value]).reshape(-1, 1))
+            for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
+                vals = event_train[:,:,id]
+                self.scalers['event'][feat].partial_fit((vals[vals != self.input_padding_value]).reshape(-1, 1))
+        else:
+            self.scalers['raw'].fit((raw_train[raw_train != self.input_padding_value]).reshape(-1, 1))
+            for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
+                vals = event_train[:,:,id]
+                self.scalers['event'][feat].fit((vals[vals != self.input_padding_value]).reshape(-1, 1))
 
     def scale_input_data(self, raw_data_split, event_data_split):
         raw_scaled = []
@@ -266,14 +274,34 @@ class DataModule():
 
         return bases_raw_aligned_data, events_sequence, bases_sequence
 
+    def save_scalers(self, path: str):
+        """Save scalers as pickle to file in path
+        """
+        with open(path, 'wb') as scalers_file:
+            pickle.dump(self.scalers, scalers_file)
+
+    def load_scalers(self, path: str):
+        """Load scalers from file pickle in path
+        """
+        with open(path, 'rb') as scalers_file:
+            self.scalers = pickle.load(scalers_file)
+
     ### chiron load source processing
 
-    def _load_all_chiron_data_samples_from_dir(self, dir):
+    def _load_all_chiron_data_samples_from_dir(self, dir, substring_match=None, max_files=None):
         dir = Path(dir)
         signals_paths = [p for p in dir.iterdir() if p.suffix == '.signal']
         signals_paths.sort()
         labels_paths = [p for p in dir.iterdir() if p.suffix == '.label']
         labels_paths.sort()
+
+        if substring_match is not None:
+            signals_paths = [p for p in signals_paths if substring_match in p.stem]
+            labels_paths = [p for p in labels_paths if substring_match in p.stem]
+
+        if max_files is not None:
+            signals_paths = signals_paths[0:max_files]
+            labels_paths = labels_paths[0:max_files]
 
         raw_samples_all, event_samples_all, bases_samples_all = [], [], []
 
@@ -301,6 +329,61 @@ class DataModule():
         events_sequence = self._get_events_sequence(bases_raw_aligned_data)
 
         return bases_raw_aligned_data, events_sequence, bases_sequence
+
+
+    def save_chiron_padded_samples(self, dir, scalers_partial_fit=False):
+        dir = Path(dir)
+        samples_dir = dir / f'samples.rawmax{self.max_raw_length}.evmax{self.max_event_length}.offset{self.bases_offset}'
+        samples_dir.mkdir(parents=True, exist_ok=True)
+
+        signals_paths = [p for p in dir.iterdir() if p.suffix == '.signal']
+        signals_paths.sort()
+        labels_paths = [p for p in dir.iterdir() if p.suffix == '.label']
+        labels_paths.sort()
+
+        random_state = self.random_seed
+        max_lens = []
+
+        for signal_path, label_path in zip(signals_paths, labels_paths):
+            bases_raw_aligned_data, events_sequence, bases_sequence = self._load_chiron_single_data(signal_path, label_path)
+            raw_samples, event_samples, bases_samples = zip(*self.samples_generator(bases_raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
+
+            if self.verbose:
+                max_len = max(map(len, bases_samples))
+                max_lens.append(max_len)
+                print('{}: max bases seq. length: {}'.format(signal_path.stem, max_len))
+                if max_len > self.max_event_length:
+                    raise Exception('Max event length smaller than max length.')
+
+            raw_samples, event_samples = self.pad_input_data(raw_samples, event_samples)
+            raw_samples = np.reshape(raw_samples, (len(raw_samples), self.max_raw_length, 1))
+            raw_samples, event_samples, bases_samples = sklearn_shuffle(raw_samples, event_samples, bases_samples, random_state=random_state)
+
+            if scalers_partial_fit:
+                self.fit_scalers(raw_samples, event_samples, partial=True)
+
+            random_state += 1
+
+            with open(samples_dir / f'{signal_path.stem}.pkl', 'wb') as f:
+                pickle.dump((raw_samples, event_samples, bases_samples), f, protocol=pickle.HIGHEST_PROTOCOL)
+
+        if self.verbose:
+            print('Max len: {}'.format(max(max_lens)))
+
+    def transform_and_replace_chiron_saved_samples(self, samples_dir):
+        samples_dir = Path(samples_dir)
+        pkl_paths = [p for p in dir.iterdir() if p.suffix == '.pkl']
+        pkl_paths.sort()
+
+        for pkl_path in pkl_paths:
+            with open(pkl_path, 'w+b') as f:
+                if self.verbose:
+                    print('Replacing {}'.format(pkl_path))
+                (raw_samples, event_samples, bases_samples) = pickle.load(f)
+                raw_data, event_data =  self.scale_input_data((raw_samples), (event_samples))
+                bases_data = self.prepare_bases_data((bases_samples))
+                pickle.dump((raw_data[0], event_data[0], bases_data[0]), f, protocol=pickle.HIGHEST_PROTOCOL)
+
 
 def text_lower_and_start_end(text):
     text = tf.strings.lower(text)
