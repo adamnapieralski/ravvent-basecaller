@@ -25,6 +25,8 @@ BASES_OFFSET = 1
 TEACHER_FORCING = False
 ATTENTION_TYPE = 'bahdanau' # 'luong'
 
+ADDITIONAL_INFO = None
+
 RANDOM_SEED = 22
 
 if DATA_TYPE == 'joint':
@@ -32,7 +34,10 @@ if DATA_TYPE == 'joint':
 else:
     NAME_MAX_LEN = f'rawmax{RAW_MAX_LEN}' if DATA_TYPE == 'raw' else f'evmax{EVENT_MAX_LEN}'
 
-NAME_SPEC = f'{DATA_TYPE}.{RNN_TYPE}.u{UNITS}.{LOAD_SOURCE}.{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}.tf{int(TEACHER_FORCING)}'
+NAME_SPEC = f'{DATA_TYPE}.{RNN_TYPE}.u{UNITS}.{LOAD_SOURCE}.{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}.tf{int(TEACHER_FORCING)}.{ATTENTION_TYPE}'
+
+if ADDITIONAL_INFO is not None:
+    NAME_SPEC += f'.{ADDITIONAL_INFO}'
 
 
 tf.random.set_seed(RANDOM_SEED)
