@@ -237,6 +237,10 @@ class Decoder(tf.keras.layers.Layer):
 
 
 class Basecaller(tf.keras.Model):
+    ##
+    ## INITIALIZATION
+    ##
+
     def __init__(self, units: int, output_text_processor, input_data_type: str, input_padding_value, rnn_type: str = 'gru', teacher_forcing: bool = True, val_teacher_forcing: bool = False):
         super().__init__()
         # Build the encoder and decoder
@@ -279,31 +283,13 @@ class Basecaller(tf.keras.Model):
         token_mask[np.array(token_mask_ids)] = True
         self.test_token_mask = token_mask
 
+
+    ##
+    ## TRAINING
+    ##
+
     def train_step(self, inputs):
         return self._tf_train_step(inputs)
-
-    def test_step(self, inputs):
-        return self._tf_val_step(inputs)
-
-    def _preprocess(self, input_data, target_sequence):
-        if self.input_data_type == 'joint':
-            (raw_input, event_input) = input_data
-            input_mask_raw = utils.input_mask(raw_input, self.input_padding_value)
-            input_mask_event = utils.input_mask(event_input, self.input_padding_value)
-            input_mask = tf.concat((input_mask_raw, input_mask_event), axis=-1)
-        else:
-            input_mask = utils.input_mask(input_data, self.input_padding_value)
-
-        # Convert the text to token IDs
-        self.shape_checker(target_sequence, ('batch',))
-        target_tokens = self.output_text_processor(target_sequence)
-        self.shape_checker(target_tokens, ('batch', 't'))
-
-        # Convert IDs to masks.
-        target_mask = target_tokens != self.output_padding_token
-        self.shape_checker(target_mask, ('batch', 't'))
-
-        return input_data, input_mask, target_tokens, target_mask
 
     def _train_step(self, data):
         input_data, target_sequence = utils.unpack_data_to_input_target(data, self.input_data_type)
@@ -379,32 +365,17 @@ class Basecaller(tf.keras.Model):
         # Return a dict mapping metric names to current value
         return {'batch_loss': average_loss}
 
-    def _loop_step(self, input_tokens, target_pred_tokens, input_mask, enc_output, dec_state, return_prediction_tokens=False):
-        # Run the decoder one step.
-        decoder_input = DecoderInput(new_tokens=input_tokens,
-                                    enc_output=enc_output,
-                                    mask=input_mask)
-
-        dec_result, dec_state = self.decoder(decoder_input, state=dec_state)
-        self.shape_checker(dec_result.logits, ('batch', 't1', 'logits'))
-        # self.shape_checker(dec_result.attention_weights, ('batch', 't1', 's'))
-        # self.shape_checker(dec_state, ('batch', 'dec_units'))
-
-        # `self.loss` returns the total for non-padded tokens
-        y = target_pred_tokens
-        y_pred = dec_result.logits
-        step_loss = self.loss(y, y_pred)
-
-        pred_tokens = None
-
-        if return_prediction_tokens:
-            pred_tokens = self._sample_prediction(dec_result.logits, 1.0)
-
-        return step_loss, dec_state, pred_tokens
-
     @tf.function
     def _tf_train_step(self, data):
         return self._train_step(data)
+
+
+    ##
+    ## VALIDATION
+    ##
+
+    def test_step(self, inputs):
+        return self._tf_val_step(inputs)
 
     def _val_step(self, data):
         input_data, target_sequence = utils.unpack_data_to_input_target(data, self.input_data_type)
@@ -497,16 +468,9 @@ class Basecaller(tf.keras.Model):
     def _tf_val_step(self, inputs):
         return self._val_step(inputs)
 
-    def _sample_prediction(self, logits, temperature):
-        if temperature == 0.0:
-            pred_tokens = tf.argmax(logits, axis=-1)
-        else:
-            logits = tf.squeeze(logits, axis=1)
-            pred_tokens = tf.random.categorical(logits / temperature, num_samples=1)
-
-        return pred_tokens
-
-    ## evaluate - test
+    ##
+    ## EVALUATION - TEST
+    ##
 
     def _sample_prediction_masked(self, logits, temperature):
         # 't' is usually 1 here.
@@ -662,3 +626,58 @@ class Basecaller(tf.keras.Model):
             accuracies.append(acc.numpy())
 
         return np.mean(accuracies)
+
+    ##
+    ## GENERAL
+    ##
+    def _preprocess(self, input_data, target_sequence):
+        if self.input_data_type == 'joint':
+            (raw_input, event_input) = input_data
+            input_mask_raw = utils.input_mask(raw_input, self.input_padding_value)
+            input_mask_event = utils.input_mask(event_input, self.input_padding_value)
+            input_mask = tf.concat((input_mask_raw, input_mask_event), axis=-1)
+        else:
+            input_mask = utils.input_mask(input_data, self.input_padding_value)
+
+        # Convert the text to token IDs
+        self.shape_checker(target_sequence, ('batch',))
+        target_tokens = self.output_text_processor(target_sequence)
+        self.shape_checker(target_tokens, ('batch', 't'))
+
+        # Convert IDs to masks.
+        target_mask = target_tokens != self.output_padding_token
+        self.shape_checker(target_mask, ('batch', 't'))
+
+        return input_data, input_mask, target_tokens, target_mask
+
+    def _loop_step(self, input_tokens, target_pred_tokens, input_mask, enc_output, dec_state, return_prediction_tokens=False):
+        # Run the decoder one step.
+        decoder_input = DecoderInput(new_tokens=input_tokens,
+                                    enc_output=enc_output,
+                                    mask=input_mask)
+
+        dec_result, dec_state = self.decoder(decoder_input, state=dec_state)
+        self.shape_checker(dec_result.logits, ('batch', 't1', 'logits'))
+        # self.shape_checker(dec_result.attention_weights, ('batch', 't1', 's'))
+        # self.shape_checker(dec_state, ('batch', 'dec_units'))
+
+        # `self.loss` returns the total for non-padded tokens
+        y = target_pred_tokens
+        y_pred = dec_result.logits
+        step_loss = self.loss(y, y_pred)
+
+        pred_tokens = None
+
+        if return_prediction_tokens:
+            pred_tokens = self._sample_prediction(dec_result.logits, 1.0)
+
+        return step_loss, dec_state, pred_tokens
+
+    def _sample_prediction(self, logits, temperature):
+        if temperature == 0.0:
+            pred_tokens = tf.argmax(logits, axis=-1)
+        else:
+            logits = tf.squeeze(logits, axis=1)
+            pred_tokens = tf.random.categorical(logits / temperature, num_samples=1)
+
+        return pred_tokens
