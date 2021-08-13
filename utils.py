@@ -24,7 +24,7 @@ def input_mask(input_sequence, padding_value):
             input_sequence (tf.Tensor): shape = (batch_sz, time, features)
             padding_value (int): padded elements consist only of padding_value (e.g. [-1], [-1, -1, -1])
     '''
-    return tf.reduce_all(input_sequence == padding_value, axis=-1)
+    return tf.reduce_all(input_sequence != padding_value, axis=-1)
 
 def unpack_data_to_input_target(data, input_data_type):
     raw_sequence, events_sequence, target_sequence = data
