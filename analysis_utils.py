@@ -3,6 +3,7 @@ Various utils functions for output analysis
 """
 import matplotlib.pyplot as plt
 import json, re
+from pathlib import Path
 from typing import Tuple
 
 def create_train_history_figure(info_path: str, save_path: str = None, loss_lim: Tuple[float, float] = None, accuracy_lim: Tuple[float, float] = (0, 0.6), figsize: Tuple[int,int] = (6,4)):
@@ -53,3 +54,13 @@ def create_train_history_figure(info_path: str, save_path: str = None, loss_lim:
         plt.savefig(save_path, bbox_inches='tight', dpi=300)
     else:
         plt.show()
+
+def prettify_info_files(dir: str, indent: int = 2):
+    dir = Path(dir)
+    for file in dir.iterdir():
+        if file.suffix != '.json':
+            continue
+        with open(file, 'r') as f:
+            content = json.load(f)
+        with open(file, 'w') as f:
+            json.dump(content, f, indent=indent)
