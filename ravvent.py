@@ -134,5 +134,7 @@ if __name__ == '__main__':
     info['train_time'] = mid_1 - start
     info['test_time'] = end - mid_2
 
+    info['batch_loss'] = batch_loss.logs
+
     with open(f'info/info.{NAME_SPEC}.json', 'w') as info_file:
         json.dump(info, info_file, indent=2)
