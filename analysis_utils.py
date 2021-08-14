@@ -1,10 +1,16 @@
 """
 Various utils functions for output analysis
 """
+import numpy as np
+import tensorflow as tf
 import matplotlib.pyplot as plt
 import json, re
 from pathlib import Path
 from typing import Tuple
+
+from data_loader import DataModule
+from basecaller import Basecaller
+import utils
 
 def create_train_history_figure(info_path: str, save_path: str = None, loss_lim: Tuple[float, float] = None, accuracy_lim: Tuple[float, float] = (0, 0.6), figsize: Tuple[int,int] = (6,4)):
     """Create (and display/save) figure with loss, val_loss and val_accuracy from training.
@@ -64,3 +70,93 @@ def prettify_info_files(dir: str, indent: int = 2):
             content = json.load(f)
         with open(file, 'w') as f:
             json.dump(content, f, indent=indent)
+
+def get_params_from_name(filename: str):
+    params = {}
+
+    for type in ['raw', 'event', 'joint']:
+        if f'{type}.' in filename:
+            params['DATA_TYPE'] = type
+
+    if params['DATA_TYPE'] in ['raw', 'joint']:
+        res = re.match(r'.*\.rawmax(\d+)\..*', filename)
+        params['RAW_MAX_LEN'] = int(res.group(1))
+    if params['DATA_TYPE'] in ['event', 'joint']:
+        res = re.match(r'.*\.evmax(\d+)\..*', filename)
+        params['RAW_MAX_LEN'] = int(res.group(1))
+
+    res = re.match(r'.*\.u(\d+)\..*', filename)
+    params['UNITS'] = int(res.group(1))
+
+    res = re.match(r'.*\.b(\d+)\..*', filename)
+    params['BATCH_SIZE'] = int(res.group(1))
+
+    res = re.match(r'.*\.ep(\d+)\..*', filename)
+    params['EPOCHS'] = int(res.group(1))
+
+    res = re.match(r'.*\.pat(\d+)\..*', filename)
+    params['PATIENCE'] = int(res.group(1))
+
+    res = re.match(r'.*\.tf(\d)\..*', filename)
+    params['TEACHER_FORCING'] = bool(res.group(1))
+
+    for rnn_type in ['gru', 'lstm', 'bigru', 'bilstm']:
+        if f'{rnn_type}.' in filename:
+            params['RNN_TYPE'] = rnn_type
+
+    for att_type in ['bahdanau', 'luong']:
+        if f'{rnn_type}.' in filename:
+            params['ATTENTION_TYPE'] = att_type
+    if 'ATTENTION_TYPE' not in params:
+        params['ATTENTION_TYPE'] = 'bahdanau'
+
+    return params
+
+def plot_attention_weights_for_prediction(model_path, input_data, save_path: str = None, seq_id: int = 0, output_max_length=50, figsize=(6, 2)):
+    params = get_params_from_name(model_path)
+
+    dm = DataModule(
+        dir='data/simulator/random_200k_perfect',
+        max_raw_length=0,
+        max_event_length=0,
+        bases_offset=0,
+        batch_size=0,
+        load_source=0,
+        random_seed=0,
+        verbose=True
+    )
+
+    basecaller = Basecaller(
+        units=params['UNITS'],
+        output_text_processor=dm.output_text_processor,
+        input_data_type=params['DATA_TYPE'],
+        input_padding_value=dm.input_padding_value,
+        rnn_type=params['RNN_TYPE'],
+        teacher_forcing=params['TEACHER_FORCING'],
+        attention_type=params['ATTENTION_TYPE']
+    )
+
+    # Configure the loss and optimizer
+    basecaller.compile(
+        optimizer=tf.optimizers.Adam(),
+        loss=utils.MaskedLoss(basecaller.output_padding_token),
+    )
+
+    basecaller.load_weights(model_path)
+
+    basecall_tokens_res = basecaller.tf_basecall_batch_to_tokens(input_data, output_max_length=output_max_length, early_break=True)
+    att = basecall_tokens_res['attention'][seq_id]
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    ax.matshow(att, cmap='viridis', vmin=0.0)
+
+    ax.set_xlabel('Input data')
+    ax.set_ylabel('Output bases')
+    model_details = model_path.replace('models/', '').replace('/model_chp', '')
+    plt.suptitle(f'Attention weights\n{model_details}')
+
+    if save_path is None:
+        plt.show()
+    else:
+        plt.savefig(save_path, bbox_inches='tight', dpi=300)
