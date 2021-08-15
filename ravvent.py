@@ -6,9 +6,9 @@ from data_loader import DataModule
 from basecaller import Basecaller
 import utils
 
-DATA_TYPE = 'joint'
+DATA_TYPE = 'raw'
 
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 
 RAW_MAX_LEN = 100
 EVENT_MAX_LEN = 30
@@ -17,15 +17,16 @@ TRAIN_SIZE = 0.8
 VAL_SIZE = 0.1
 TEST_SIZE = 0.1
 
-UNITS = 16
-EPOCHS = 2
-PATIENCE = 50
+UNITS = 128
+EPOCHS = 25
+PATIENCE = 10
 DATA_PATH = 'data/chiron/train'
 BASES_OFFSET = 1
 TEACHER_FORCING = False
-RNN_TYPE = 'lstm'
+RNN_TYPE = 'gru'
 LOAD_SOURCE = 'simulator'
 ATTENTION_TYPE = 'bahdanau' # 'luong'
+EMBEDDING_DIM = 5
 
 ADDITIONAL_INFO = None
 
@@ -36,7 +37,7 @@ if DATA_TYPE == 'joint':
 else:
     NAME_MAX_LEN = f'rawmax{RAW_MAX_LEN}' if DATA_TYPE == 'raw' else f'evmax{EVENT_MAX_LEN}'
 
-NAME_SPEC = f'{DATA_TYPE}.{RNN_TYPE}.u{UNITS}.{LOAD_SOURCE}.{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}.tf{int(TEACHER_FORCING)}.{ATTENTION_TYPE}'
+NAME_SPEC = f'{DATA_TYPE}.{RNN_TYPE}.u{UNITS}.{LOAD_SOURCE}.{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}.tf{int(TEACHER_FORCING)}.emb{EMBEDDING_DIM}.{ATTENTION_TYPE}'
 
 if ADDITIONAL_INFO is not None:
     NAME_SPEC += f'.{ADDITIONAL_INFO}'
@@ -87,6 +88,7 @@ if __name__ == '__main__':
         output_text_processor=dm.output_text_processor,
         input_data_type=DATA_TYPE,
         input_padding_value=dm.input_padding_value,
+        embedding_dim=EMBEDDING_DIM,
         rnn_type=RNN_TYPE,
         teacher_forcing=TEACHER_FORCING,
         attention_type=ATTENTION_TYPE
@@ -119,6 +121,10 @@ if __name__ == '__main__':
     start = timer()
     hist = basecaller.fit(train_ds, epochs=EPOCHS, callbacks=[batch_loss, model_checkpoint_callback, early_stopping_callback], validation_data=val_ds)
     mid_1 = timer()
+
+    # load best model by val_batch_loss
+    basecaller.load_weights(f'models/model.{NAME_SPEC}/model_chp')
+
     print(hist.history)
 
     info = {}

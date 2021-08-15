@@ -157,15 +157,15 @@ class DecoderOutput(typing.NamedTuple):
 
 
 class Decoder(tf.keras.layers.Layer):
-    def __init__(self, output_vocab_size, dec_units, enc_units, rnn_type: str = 'gru', bidir_merge_mode: str = 'sum', attention_type: str = 'bahdanau'):
+    def __init__(self, output_vocab_size, dec_units, enc_units, embedding_dim: int = 1, rnn_type: str = 'gru', bidir_merge_mode: str = 'sum', attention_type: str = 'bahdanau'):
         super(Decoder, self).__init__()
         self.output_vocab_size = output_vocab_size
         self.dec_units = dec_units
         self.enc_units = enc_units
+        self.embedding_dim = embedding_dim
         self.rnn_type = rnn_type
         self.bidir_merge_mode = bidir_merge_mode
         self.attention_type = attention_type
-        self.embedding_dim = 1 # constant
 
         # For Step 1. The embedding layer convets token IDs to vectors
         self.embedding = tf.keras.layers.Embedding(self.output_vocab_size, self.embedding_dim)
@@ -270,7 +270,7 @@ class Basecaller(tf.keras.Model):
     ## INITIALIZATION
     ##
 
-    def __init__(self, units: int, output_text_processor, input_data_type: str, input_padding_value, rnn_type: str = 'gru', teacher_forcing: bool = True, val_teacher_forcing: bool = False, attention_type: str = 'bahdanau'):
+    def __init__(self, units: int, output_text_processor, input_data_type: str, input_padding_value, embedding_dim: int = 1, rnn_type: str = 'gru', teacher_forcing: bool = True, val_teacher_forcing: bool = False, attention_type: str = 'bahdanau'):
         """Initialize
 
         Args:
@@ -278,6 +278,7 @@ class Basecaller(tf.keras.Model):
             output_text_processor ([type]): From DataLoader
             input_data_type (str): {'raw', 'event', 'joint'}
             input_padding_value ([type]): From DataLoader
+            embedding_dim (int): embedding dim for decoder
             rnn_type (str, optional): Type of RNN to use, {'gru', 'lstm', 'bigru', 'bilstm'}. Defaults to 'gru'.
             teacher_forcing (bool, optional): If use teacher forcing during training. Defaults to True.
             val_teacher_forcing (bool, optional): If use teacher forcing on validation. Defaults to False.
@@ -288,9 +289,9 @@ class Basecaller(tf.keras.Model):
         encoder_raw = Encoder(units, 'raw', rnn_type=rnn_type)
         encoder_event = Encoder(units, 'event', rnn_type=rnn_type)
         if input_data_type == 'joint':
-            decoder = Decoder(output_text_processor.vocabulary_size(), 2 * units, units, rnn_type=rnn_type, attention_type=attention_type)
+            decoder = Decoder(output_text_processor.vocabulary_size(), 2 * units, units, embedding_dim=embedding_dim, rnn_type=rnn_type, attention_type=attention_type)
         else:
-            decoder = Decoder(output_text_processor.vocabulary_size(), units, units, rnn_type=rnn_type, attention_type=attention_type)
+            decoder = Decoder(output_text_processor.vocabulary_size(), units, units, embedding_dim=embedding_dim, rnn_type=rnn_type, attention_type=attention_type)
 
         self.encoder_raw = encoder_raw
         self.encoder_event = encoder_event
