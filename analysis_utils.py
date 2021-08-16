@@ -100,6 +100,12 @@ def get_params_from_name(filename: str):
     res = re.match(r'.*\.tf(\d)\..*', filename)
     params['TEACHER_FORCING'] = bool(res.group(1))
 
+    res = re.match(r'.*\.emb(\d)\..*', filename)
+    if res:
+        params['EMBEDDING_DIM'] = int(res.group(1))
+    else:
+        params['EMBEDDING_DIM'] = 1
+
     for rnn_type in ['gru', 'lstm', 'bigru', 'bilstm']:
         if f'{rnn_type}.' in filename:
             params['RNN_TYPE'] = rnn_type
@@ -133,7 +139,8 @@ def plot_attention_weights_for_prediction(model_path, input_data, save_path: str
         input_padding_value=dm.input_padding_value,
         rnn_type=params['RNN_TYPE'],
         teacher_forcing=params['TEACHER_FORCING'],
-        attention_type=params['ATTENTION_TYPE']
+        attention_type=params['ATTENTION_TYPE'],
+        embedding_dim=params['EMBEDDING_DIM']
     )
 
     # Configure the loss and optimizer
