@@ -7,12 +7,13 @@ import matplotlib.pyplot as plt
 import json, re
 from pathlib import Path
 from typing import Tuple
+from pathlib import Path
 
 from data_loader import DataModule
 from basecaller import Basecaller
 import utils
 
-def create_train_history_figure(info_path: str, save_path: str = None, loss_lim: Tuple[float, float] = None, accuracy_lim: Tuple[float, float] = (0, 0.6), figsize: Tuple[int,int] = (6,4)):
+def create_train_history_figure(info_path: str, save_path: str = None, loss_lim: Tuple[float, float] = None, accuracy_lim: Tuple[float, float] = (0, 1), figsize: Tuple[int,int] = (6,4)):
     """Create (and display/save) figure with loss, val_loss and val_accuracy from training.
 
     Args:
@@ -70,6 +71,15 @@ def prettify_info_files(dir: str, indent: int = 2):
             content = json.load(f)
         with open(file, 'w') as f:
             json.dump(content, f, indent=indent)
+
+def save_train_history_figures_info_dir(dir: str):
+    dir = Path(dir)
+    for info_path in [p for p in dir.iterdir() if p.suffix == '.json']:
+        save_path = info_path.with_suffix('.png')
+        create_train_history_figure(
+            info_path=str(info_path),
+            save_path=str(save_path)
+        )
 
 def get_params_from_name(filename: str):
     params = {}
