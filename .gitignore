@@ -1,6 +1,7 @@
 data/*
 !data/.gitkeep
 !data/generate_simulator_reduced.py
+!data/simulator-6-mers.json
 models/*
 !models/.gitkeep
 info/*
