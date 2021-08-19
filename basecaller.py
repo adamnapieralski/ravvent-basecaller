@@ -515,19 +515,19 @@ class Basecaller(tf.keras.Model):
                 break
 
         result_tokens = result_tokens.stack()
-        self.shape_checker(result_tokens, ('t', 'batch', 't0'))
+        # self.shape_checker(result_tokens, ('t', 'batch', 't0'))
         result_tokens = tf.squeeze(result_tokens, -1)
         result_tokens = tf.transpose(result_tokens, [1, 0])
-        self.shape_checker(result_tokens, ('batch', 't'))
+        # self.shape_checker(result_tokens, ('batch', 't'))
 
         attention_stack = attention.stack()
-        self.shape_checker(attention_stack, ('t', 'batch', 't1', 's'))
+        # self.shape_checker(attention_stack, ('t', 'batch', 't1', 's'))
 
         attention_stack = tf.squeeze(attention_stack, 2)
-        self.shape_checker(attention_stack, ('t', 'batch', 's'))
+        # self.shape_checker(attention_stack, ('t', 'batch', 's'))
 
         attention_stack = tf.transpose(attention_stack, [1, 0, 2])
-        self.shape_checker(attention_stack, ('batch', 't', 's'))
+        # self.shape_checker(attention_stack, ('batch', 't', 's'))
 
         return {'token_sequences': result_tokens, 'attention': attention_stack}
 
@@ -536,22 +536,22 @@ class Basecaller(tf.keras.Model):
         return self.basecall_batch_to_tokens(input_data, output_max_length=output_max_length, early_break=early_break)
 
     def tokens_to_bases_sequence(self, result_tokens):
-        self.shape_checker(result_tokens, ('batch', 't'))
+        # self.shape_checker(result_tokens, ('batch', 't'))
         result_text_tokens = self.output_token_string_from_index(result_tokens)
-        self.shape_checker(result_text_tokens, ('batch', 't'))
+        # self.shape_checker(result_text_tokens, ('batch', 't'))
 
         result_text = tf.strings.reduce_join(result_text_tokens, axis=1, separator=' ')
-        self.shape_checker(result_text, ('batch'))
+        # self.shape_checker(result_text, ('batch'))
 
         result_text = tf.strings.strip(result_text)
-        self.shape_checker(result_text, ('batch',))
+        # self.shape_checker(result_text, ('batch',))
         return result_text
 
     def basecall_batch(self, input_data, *, output_max_length=100):
         basecall_tokens_res = self.tf_basecall_batch_to_tokens(input_data, output_max_length=output_max_length)
         token_sequences = basecall_tokens_res['token_sequences']
         result_base_sequences = self.tokens_to_bases_sequence(token_sequences)
-        self.shape_checker(result_base_sequences, ('batch',))
+        # self.shape_checker(result_base_sequences, ('batch',))
 
         return {'base_sequences': result_base_sequences, 'attention': basecall_tokens_res['attention']}
 

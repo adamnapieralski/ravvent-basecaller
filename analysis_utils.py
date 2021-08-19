@@ -36,6 +36,9 @@ def create_train_history_figure(info_path: str, save_path: str = None, loss_lim:
     lns1 = ax1.plot(history['batch_loss'], label='loss', color='red')
     lns2 = ax1.plot(history['val_batch_loss'], label='val_loss', color='blue')
 
+    min_val_loss_epoch = history['val_batch_loss'].index(min(history['val_batch_loss']))
+    plt.axvline(x=min_val_loss_epoch, c='grey')
+
     ax2 = ax1.twinx()
 
     ax2.set_ylabel('accuracy')

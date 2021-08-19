@@ -17,7 +17,10 @@ import utils
 INPUT_MASK = tf.float32.max
 
 class DataModule():
-    def __init__(self, dir: str, max_raw_length: int, max_event_length:int, bases_offset: int = 1, batch_size: int = 64, train_size: float = 0.8, val_size: float = 0.1, test_size: float = 0.1, load_source: str = 'simulator', random_seed: int = 0, verbose: bool = False):
+    def __init__(
+        self, dir: str, max_raw_length: int, max_event_length:int, bases_offset: int = 1, batch_size: int = 64,
+        train_size: float = 0.8, val_size: float = 0.1, test_size: float = 0.1, load_source: str = 'simulator',
+        event_detection: bool = False, random_seed: int = 0, verbose: bool = False):
         '''Initialize DataModule
             Parameters:
                 dir (str): directory to load data from (dependent on load_source)
@@ -27,6 +30,7 @@ class DataModule():
                 batch_size (int): Number of data rows in batch
                 data_type (str): Data type - allowed values: "raw", "event"
                 load_source (str): supported 'simulator'/'chiron'
+                event_detection (bool): should use event_detection output for data preparation
                 random_seed (int): Random seed
         '''
         self.dir = dir
@@ -38,6 +42,7 @@ class DataModule():
         self.val_size = val_size
         self.test_size = test_size
         self.load_source = load_source
+        self.event_detection = event_detection
         self.random_seed = random_seed if random_seed != 0 else np.random.randint(1)
         self.verbose = verbose
 
@@ -65,8 +70,8 @@ class DataModule():
 
     def load_data_samples(self):
         if self.load_source == 'simulator':
-            raw_aligned_data, events_sequence, bases_sequence = self._load_simulator_data(self.dir)
-            raw_samples, event_samples, bases_samples = zip(*self.samples_generator(raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
+            raw_aligned_data, events_sequence, bases_sequence, alignment_data = self._load_simulator_data(self.dir, event_detection=self.event_detection)
+            raw_samples, event_samples, bases_samples = zip(*self.samples_generator(raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset, alignment_data, self.event_detection))
         elif self.load_source == 'chiron':
             raw_samples, event_samples, bases_samples = self._load_all_chiron_data_samples_from_dir(self.dir)
 
@@ -171,7 +176,13 @@ class DataModule():
             bases_prep.append([' '.join(bases_sample) for bases_sample in bases])
         return tuple(bases_prep)
 
-    def samples_generator(self, raw_aligned_data, events_sequence, bases_sequence, max_raw_length, bases_offset):
+    def get_bases_subsequence_ground_true_aligned(self, start_raw_id, end_raw_id, bases_sequence, alignment_gt):
+        """alignment_gt of type & shape returned from _get_alignment_data()
+        """
+        bases_ids = alignment_gt[1, start_raw_id:end_raw_id]
+        return bases_sequence[min(bases_ids)-1:max(bases_ids)] # -1 due to 1 starting indices in alignment
+
+    def samples_generator(self, raw_aligned_data, events_sequence, bases_sequence, max_raw_length, bases_offset, alignment_gt_data, event_detection):
         for i in range(0, len(bases_sequence) - bases_offset + 1, bases_offset):
             j = i
             raw_length_sum = len(raw_aligned_data[j])
@@ -188,7 +199,15 @@ class DataModule():
             # flatten raw vals
             raw_subsequence = [val for raw_single_base in raw_aligned_data[i:j+1] for val in raw_single_base]
             events_subsequence = events_sequence[i:j+1]
-            bases_subsequence = bases_sequence[i:j+1]
+
+            if event_detection:
+                start_raw_id = sum([len(x) for x in raw_aligned_data[0:i]])
+                end_raw_id = start_raw_id + len(raw_subsequence)
+                bases_subsequence = self.get_bases_subsequence_ground_true_aligned(
+                    start_raw_id, end_raw_id, bases_sequence, alignment_gt_data
+                )
+            else:
+                bases_subsequence = bases_sequence[i:j+1]
 
             yield raw_subsequence, events_subsequence, bases_subsequence
 
@@ -229,6 +248,16 @@ class DataModule():
         data = np.loadtxt(ali_path, delimiter=" ", dtype=int)
         return data.T
 
+    def _get_event_detection_alignment_data(self, ed_ali_path: str) -> np.ndarray:
+        data = (np.loadtxt(ed_ali_path)[:, 2:4]).astype(int)
+        raw_ids, bases_ids = [], []
+        i = 1
+        for base_range in data:
+            bases_ids.extend([i] * base_range[0])
+            i += 1
+        raw_ids = [x for x in range(len(bases_ids))]
+        return np.array([raw_ids, bases_ids])
+
     def _get_bases_raw_aligned_data(self, alignment_data, raw_data):
         """Get list of lists of base's raw values for each base/nucleotide"""
         bases_raw_aligned_data = []
@@ -258,7 +287,7 @@ class DataModule():
 
         return np.array(events_sequence)
 
-    def _load_simulator_data(self, dir):
+    def _load_simulator_data(self, dir, event_detection=False):
         dir = Path(dir)
         fasta_path = dir / "sampled_read.fasta"
         fast5_path = next((dir / "fast5").iterdir())
@@ -268,11 +297,16 @@ class DataModule():
         raw_signal_data = self._get_fast5_raw_data(fast5_path)
         alignment_data = self._get_alignment_data(align_path)
 
-        bases_raw_aligned_data = self._get_bases_raw_aligned_data(alignment_data, raw_signal_data)
+        if event_detection:
+            event_detection_path = dir / 'event_detection.txt'
+            alignment_event_detection_data = self._get_event_detection_alignment_data(event_detection_path)
+            bases_raw_aligned_data = self._get_bases_raw_aligned_data(alignment_event_detection_data, raw_signal_data)
+        else:
+            bases_raw_aligned_data = self._get_bases_raw_aligned_data(alignment_data, raw_signal_data)
 
         events_sequence = self._get_events_sequence(bases_raw_aligned_data)
 
-        return bases_raw_aligned_data, events_sequence, bases_sequence
+        return bases_raw_aligned_data, events_sequence, bases_sequence, alignment_data
 
     def save_scalers(self, path: str):
         """Save scalers as pickle to file in path
