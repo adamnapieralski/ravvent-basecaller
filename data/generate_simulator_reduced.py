@@ -4,6 +4,7 @@ import subprocess
 import shlex
 import itertools
 import json
+from pathlib import Path
 from typing import List
 
 bases = ['A', 'C', 'G', 'T']
@@ -75,15 +76,22 @@ def run_deepsimulator(fasta_path, output_path, random_seed=0):
     cmd = '/home/napiad/Programs/DeepSimulator/deep_simulator.sh -H /home/napiad/Programs/DeepSimulator/ -i {} -o {} -G 1 -B 2 -n -1 -P 0 -O 1 -S {} -M 0'.format(fasta_path, output_path, random_seed)
     subprocess.run(shlex.split(cmd))
 
+def run_event_detection(sim_out_dir: str):
+    dir = Path(sim_out_dir)
+    fast5_path = next((dir / "fast5").iterdir())
+    cmd = '/home/napiad/mgr/praca-dyplomowa/event_detection/detect_events --win-len1 5 --win-len2 13 {}'.format(str(fast5_path))
+    with open(dir / 'event_detection.txt', 'wt') as f:
+        subprocess.run(shlex.split(cmd), stdout=f)
+
 if __name__ == '__main__':
     mers = load_mers()
 
     generation_details = [
-        {'id': 3, 'length': 10000, '6_mers_num': 45}, # 45 6-mers
-        {'id': 12, 'length': 25000, '6_mers_num': 450}, # 450 6-mers
-        {'id': 21, 'length': 50000, '6_mers_num': 1024}, # 1024 6-mers
-        {'id': 43, 'length': 100000, '6_mers_num': 2048}, # 2048 6-mers
-        {'id': 4096, 'length': 200000, '6_mers_num': 4096} # all
+        {'id': 3, 'length': 25000, '6_mers_num': 45}, # 45 6-mers
+        {'id': 12, 'length': 75000, '6_mers_num': 450}, # 450 6-mers
+        {'id': 21, 'length': 150000, '6_mers_num': 1024}, # 1024 6-mers
+        {'id': 43, 'length': 300000, '6_mers_num': 2048}, # 2048 6-mers
+        {'id': 4096, 'length': 600000, '6_mers_num': 4096} # all
     ]
 
     for det in generation_details:
@@ -93,4 +101,6 @@ if __name__ == '__main__':
             with open(filename, 'wt') as f:
                 f.write(">{}\n".format(filename.replace('.fasta', '')))
                 f.write(seq)
-            run_deepsimulator(filename, filename.replace('.fasta', ''), random_seed=det['id'] if purpose_type == 'train' else 2 * det['id'])
+            out_dir = filename.replace('.fasta', '')
+            run_deepsimulator(filename, out_dir, random_seed=det['id'] if purpose_type == 'train' else 2 * det['id'])
+            run_event_detection(out_dir)
