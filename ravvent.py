@@ -101,6 +101,7 @@ if __name__ == '__main__':
     )
     batch_loss = utils.BatchLogs('batch_loss')
 
+    # Callbacks
     checkpoint_filepath = f'models/model.{NAME_SPEC}/model_chp'
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_filepath,
@@ -109,7 +110,6 @@ if __name__ == '__main__':
         mode='min',
         save_best_only=True
     )
-
     early_stopping_callback = tf.keras.callbacks.EarlyStopping(
         monitor='val_batch_loss',
         patience=PATIENCE,
@@ -117,9 +117,18 @@ if __name__ == '__main__':
         mode='min',
         verbose=1
     )
+    csv_logger = tf.keras.callbacks.CSVLogger(
+        f'info/csvlog.{NAME_SPEC}.log',
+    )
+    nan_terminate = tf.keras.callbacks.TerminateOnNaN()
 
     start = timer()
-    hist = basecaller.fit(train_ds, epochs=EPOCHS, callbacks=[batch_loss, model_checkpoint_callback, early_stopping_callback], validation_data=val_ds)
+    hist = basecaller.fit(
+        train_ds,
+        epochs=EPOCHS,
+        callbacks=[batch_loss, model_checkpoint_callback, early_stopping_callback, csv_logger, nan_terminate],
+        validation_data=val_ds
+    )
     mid_1 = timer()
 
     # load best model by val_batch_loss

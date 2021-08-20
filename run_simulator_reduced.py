@@ -102,6 +102,7 @@ def run_simulator_training(
 
     batch_loss = utils.BatchLogs('batch_loss')
 
+    # Callbacks
     checkpoint_filepath = f'models/simulator.reduced/model.{name}/model_chp'
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_filepath,
@@ -110,7 +111,6 @@ def run_simulator_training(
         mode='min',
         save_best_only=True
     )
-
     early_stopping_callback = tf.keras.callbacks.EarlyStopping(
         monitor='val_batch_loss',
         patience=patience,
@@ -118,9 +118,18 @@ def run_simulator_training(
         mode='min',
         verbose=1
     )
+    csv_logger = tf.keras.callbacks.CSVLogger(
+        f'info/simulator.reduced/csvlog.{name}.log',
+    )
+    nan_terminate = tf.keras.callbacks.TerminateOnNaN()
 
     start = timer()
-    hist = basecaller.fit(train_ds, epochs=epochs, callbacks=[batch_loss, model_checkpoint_callback, early_stopping_callback], validation_data=val_ds)
+    hist = basecaller.fit(
+        train_ds,
+        epochs=epochs,
+        callbacks=[batch_loss, model_checkpoint_callback, early_stopping_callback, csv_logger, nan_terminate],
+        validation_data=val_ds
+    )
     mid_1 = timer()
 
     # load best model by val_batch_loss
