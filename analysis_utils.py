@@ -96,7 +96,7 @@ def get_params_from_name(filename: str):
         params['RAW_MAX_LEN'] = int(res.group(1))
     if params['DATA_TYPE'] in ['event', 'joint']:
         res = re.match(r'.*\.evmax(\d+)\..*', filename)
-        params['RAW_MAX_LEN'] = int(res.group(1))
+        params['EVENT_MAX_LEN'] = int(res.group(1))
 
     res = re.match(r'.*\.u(\d+)\..*', filename)
     params['UNITS'] = int(res.group(1))
@@ -112,6 +112,9 @@ def get_params_from_name(filename: str):
 
     res = re.match(r'.*\.tf(\d)\..*', filename)
     params['TEACHER_FORCING'] = bool(res.group(1))
+
+    res = re.match(r'.*\.ed(\d)\..*', filename)
+    params['EVENT_DETECTION'] = bool(res.group(1))
 
     res = re.match(r'.*\.emb(\d)\..*', filename)
     if res:
@@ -133,6 +136,7 @@ def get_params_from_name(filename: str):
 
 def plot_attention_weights_for_prediction(model_path, input_data, save_path: str = None, seq_id: int = 0, output_max_length=50, figsize=(6, 2)):
     params = get_params_from_name(model_path)
+    print(params)
 
     dm = DataModule(
         dir='data/simulator/random_200k_perfect',
