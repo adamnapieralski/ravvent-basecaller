@@ -288,10 +288,7 @@ class Basecaller(tf.keras.Model):
         # Build the encoder and decoder
         encoder_raw = Encoder(units, 'raw', rnn_type=rnn_type)
         encoder_event = Encoder(units, 'event', rnn_type=rnn_type)
-        if input_data_type == 'joint':
-            decoder = Decoder(output_text_processor.vocabulary_size(), 2 * units, units, embedding_dim=embedding_dim, rnn_type=rnn_type, attention_type=attention_type)
-        else:
-            decoder = Decoder(output_text_processor.vocabulary_size(), units, units, embedding_dim=embedding_dim, rnn_type=rnn_type, attention_type=attention_type)
+        decoder = Decoder(output_text_processor.vocabulary_size(), units, units, embedding_dim=embedding_dim, rnn_type=rnn_type, attention_type=attention_type)
 
         self.encoder_raw = encoder_raw
         self.encoder_event = encoder_event
@@ -634,9 +631,9 @@ class Basecaller(tf.keras.Model):
         if len(tf.shape(enc_state_raw)) == 3:
             enc_state = []
             for st_raw, st_event in zip(enc_state_raw, enc_state_event):
-                enc_state.append(tf.concat((st_raw, st_event), axis=1))
+                enc_state.append(tf.add(st_raw, st_event))
         else:
-            enc_state = tf.concat((enc_state_raw, enc_state_event), axis=1)
+            enc_state = tf.add(enc_state_raw, enc_state_event)
         return enc_state
 
     def _prepare_input_mask(self, input_data):

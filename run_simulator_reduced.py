@@ -76,12 +76,23 @@ def run_simulator_training(
         random_seed=RANDOM_SEED,
         verbose=True
     )
-    dm.setup()
-    train_ds = dm.dataset_train
-    dm.dir = 'data/simulator/reduced/{}.eval'.format(data_string)
-    dm.train_size, dm.val_size, dm.test_size = 0, 0.25, 0.75
-    dm.setup()
-    val_ds, test_ds = dm.dataset_val, dm.dataset_test
+    if data_string == 'seq.4096.600000.4096':
+        train_ds = tf.data.experimental.load(
+            'data/simulator/reduced/f{name}.rawmax200.evmax30.b128.ed1.train.dataset'
+        )
+        val_ds = tf.data.experimental.load(
+            'data/simulator/reduced/f{name}.rawmax200.evmax30.b128.ed1.val.dataset'
+        )
+        test_ds = tf.data.experimental.load(
+            'data/simulator/reduced/f{name}.rawmax200.evmax30.b128.ed1.test.dataset'
+        )
+    else:
+        dm.setup()
+        train_ds = dm.dataset_train
+        dm.dir = 'data/simulator/reduced/{}.eval'.format(data_string)
+        dm.train_size, dm.val_size, dm.test_size = 0, 0.25, 0.75
+        dm.setup()
+        val_ds, test_ds = dm.dataset_val, dm.dataset_test
 
     basecaller = Basecaller(
         units=units,
@@ -156,16 +167,6 @@ def run_simulator_training(
         json.dump(info, info_file, indent=2)
 
 if __name__ == '__main__':
-    # variants = [
-    #     'seq.3.25000.45',
-    #     'seq.3.50000.45'
-    #     # 'seq.3.10000.45',
-    #     # 'seq.12.25000.450',
-    #     # 'seq.21.50000.1024',
-    #     # 'seq.43.100000.2048',
-    #     # 'seq.4096.200000.4096'
-    # ]
-
     basic_params = {
         'data_string': '',
         'data_type': '',
@@ -182,28 +183,22 @@ if __name__ == '__main__':
         'event_detection': True
     }
 
-    # variants = [
-    #     {'data_string': 'seq.3.10000.45', 'rnn_type': 'lstm'},
-    #     {'data_string': 'seq.3.25000.45', 'rnn_type': 'lstm'},
-    #     {'data_string': 'seq.3.10000.45', 'rnn_type': 'bigru'},
-    #     {'data_string': 'seq.3.25000.45', 'rnn_type': 'bigru'},
-    #     {'data_string': 'seq.3.10000.45', 'rnn_type': 'bilstm'},
-    #     {'data_string': 'seq.3.25000.45', 'rnn_type': 'bilstm'},
-    #     {'data_string': 'seq.3.10000.45', 'rnn_type': 'gru'},
-    #     {'data_string': 'seq.3.25000.45', 'rnn_type': 'gru'},
-    #     {'data_string': 'seq.21.50000.1024', 'rnn_type': 'lstm'},
-    # ]
     variants = [
         {'data_string': 'seq.3.25000.45', 'data_type': 'raw', 'rnn_type': 'bilstm', 'event_detection': True},
         {'data_string': 'seq.3.25000.45', 'data_type': 'event', 'rnn_type': 'bilstm', 'event_detection': True},
+        {'data_string': 'seq.3.25000.45', 'data_type': 'joint', 'rnn_type': 'bilstm', 'event_detection': True},
         {'data_string': 'seq.12.75000.450', 'data_type': 'raw', 'rnn_type': 'bilstm', 'event_detection': True},
         {'data_string': 'seq.12.75000.450', 'data_type': 'event', 'rnn_type': 'bilstm', 'event_detection': True},
+        {'data_string': 'seq.12.75000.450', 'data_type': 'joint', 'rnn_type': 'bilstm', 'event_detection': True},
         {'data_string': 'seq.21.150000.1024', 'data_type': 'raw', 'rnn_type': 'bilstm', 'event_detection': True},
         {'data_string': 'seq.21.150000.1024', 'data_type': 'event', 'rnn_type': 'bilstm', 'event_detection': True},
+        {'data_string': 'seq.21.150000.1024', 'data_type': 'joint', 'rnn_type': 'bilstm', 'event_detection': True},
         {'data_string': 'seq.43.300000.2048', 'data_type': 'raw', 'rnn_type': 'bilstm', 'event_detection': True},
         {'data_string': 'seq.43.300000.2048', 'data_type': 'event', 'rnn_type': 'bilstm', 'event_detection': True},
+        {'data_string': 'seq.43.300000.2048', 'data_type': 'joint', 'rnn_type': 'bilstm', 'event_detection': True},
         {'data_string': 'seq.4096.600000.4096', 'data_type': 'raw', 'rnn_type': 'bilstm', 'event_detection': True},
         {'data_string': 'seq.4096.600000.4096', 'data_type': 'event', 'rnn_type': 'bilstm', 'event_detection': True},
+        {'data_string': 'seq.4096.600000.4096', 'data_type': 'joint', 'rnn_type': 'bilstm', 'event_detection': True},
     ]
 
     for v in variants:
