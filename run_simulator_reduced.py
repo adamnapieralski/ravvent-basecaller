@@ -78,13 +78,13 @@ def run_simulator_training(
     )
     if data_string == 'seq.4096.600000.4096':
         train_ds = tf.data.experimental.load(
-            'data/simulator/reduced/f{name}.rawmax200.evmax30.b128.ed1.train.dataset'
+            f'data/simulator/reduced/{data_string}.rawmax200.evmax30.b128.ed1.train.dataset'
         )
         val_ds = tf.data.experimental.load(
-            'data/simulator/reduced/f{name}.rawmax200.evmax30.b128.ed1.val.dataset'
+            f'data/simulator/reduced/{data_string}.rawmax200.evmax30.b128.ed1.val.dataset'
         )
         test_ds = tf.data.experimental.load(
-            'data/simulator/reduced/f{name}.rawmax200.evmax30.b128.ed1.test.dataset'
+            f'data/simulator/reduced/f{data_string}.rawmax200.evmax30.b128.ed1.test.dataset'
         )
     else:
         dm.setup()
