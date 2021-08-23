@@ -84,7 +84,7 @@ def run_simulator_training(
             f'data/simulator/reduced/{data_string}.rawmax200.evmax30.b128.ed1.val.dataset'
         )
         test_ds = tf.data.experimental.load(
-            f'data/simulator/reduced/f{data_string}.rawmax200.evmax30.b128.ed1.test.dataset'
+            f'data/simulator/reduced/{data_string}.rawmax200.evmax30.b128.ed1.test.dataset'
         )
     else:
         dm.setup()
