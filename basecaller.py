@@ -7,6 +7,7 @@ import typing
 from typing import Any, Tuple
 
 import utils
+import merger
 
 class Encoder(tf.keras.layers.Layer):
     def __init__(self, enc_units: int, data_type: str, rnn_type: str = 'gru', bidir_merge_mode: str = 'sum'):
@@ -551,6 +552,21 @@ class Basecaller(tf.keras.Model):
         # self.shape_checker(result_base_sequences, ('batch',))
 
         return {'base_sequences': result_base_sequences, 'attention': basecall_tokens_res['attention']}
+
+    def basecall_batches(self, data):
+        bases_sequences = []
+        for data_batch in data:
+            input_data, target_sequence = utils.unpack_data_to_input_target(data_batch, self.input_data_type)
+            max_target_length = tf.shape(self.output_text_processor(target_sequence))[1]
+            results = self.basecall_batch(input_data, output_max_length=max_target_length)
+
+            bs = [
+                x.decode('UTF-8').replace('[START]', '').replace('[END]', '').replace(' ', '').upper()
+                for x in list(results['base_sequences'].numpy())
+            ]
+            bases_sequences.extend(bs)
+
+        return merger.merge_chunks(bases_sequences)
 
     def evaluate_test_batch(self, data):
         input_data, target_sequence = utils.unpack_data_to_input_target(data, self.input_data_type)

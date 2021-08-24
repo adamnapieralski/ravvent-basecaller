@@ -6,6 +6,8 @@ models/*
 !models/.gitkeep
 info/*
 !info/.gitkeep
+guppy_benchmark
+
 .vscode
 
 *.ipynb

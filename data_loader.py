@@ -20,7 +20,7 @@ class DataModule():
     def __init__(
         self, dir: str, max_raw_length: int, max_event_length:int, bases_offset: int = 1, batch_size: int = 64,
         train_size: float = 0.8, val_size: float = 0.1, test_size: float = 0.1, load_source: str = 'simulator',
-        event_detection: bool = False, random_seed: int = 0, verbose: bool = False):
+        event_detection: bool = False, random_seed: int = 0, shuffle: bool = True, verbose: bool = False):
         '''Initialize DataModule
             Parameters:
                 dir (str): directory to load data from (dependent on load_source)
@@ -32,6 +32,7 @@ class DataModule():
                 load_source (str): supported 'simulator'/'chiron'
                 event_detection (bool): should use event_detection output for data preparation
                 random_seed (int): Random seed
+                shuffle (bool): If shuffle the data before splitting
         '''
         self.dir = dir
         self.max_raw_length = max_raw_length
@@ -42,6 +43,7 @@ class DataModule():
         self.val_size = val_size
         self.test_size = test_size
         self.load_source = load_source
+        self.shuffle = shuffle
         self.event_detection = event_detection
         self.random_seed = random_seed if random_seed != 0 else np.random.randint(1)
         self.verbose = verbose
@@ -80,7 +82,7 @@ class DataModule():
     def process_and_split_data_samples(self, raw_samples, event_samples, bases_samples):
         raw_data, event_data = self.pad_input_data(raw_samples, event_samples)
         raw_data = np.reshape(raw_data, (len(raw_data), self.max_raw_length, 1))
-        raw_data_split, event_data_split, bases_data_split = self.train_val_test_split(raw_data, event_data, bases_samples, train_size=self.train_size, val_size=self.val_size, test_size=self.test_size)
+        raw_data_split, event_data_split, bases_data_split = self.train_val_test_split(raw_data, event_data, bases_samples, train_size=self.train_size, val_size=self.val_size, test_size=self.test_size, shuffle=self.shuffle)
 
         # scaling
         if raw_data_split[0] is not None and event_data_split[0] is not None:
@@ -117,10 +119,10 @@ class DataModule():
             print('Val samples:\t{}, batches:\t{}'.format(0 if bases_data_split[1] == None else len(bases_data_split[1]), 0 if self.dataset_val == None else tf.data.experimental.cardinality(self.dataset_val).numpy()))
             print('Test samples:\t{}, batches:\t{}'.format(0 if bases_data_split[2] == None else len(bases_data_split[2]), 0 if self.dataset_test == None else tf.data.experimental.cardinality(self.dataset_test).numpy()))
 
-    def train_val_test_split(self, raw_data, event_data, bases_data, train_size=0.8, val_size=0.1, test_size=0.1):
-        raw_train, raw_val, raw_test = utils.train_val_test_split(raw_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
-        event_train, event_val, event_test = utils.train_val_test_split(event_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
-        bases_train, bases_val, bases_test = utils.train_val_test_split(bases_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
+    def train_val_test_split(self, raw_data, event_data, bases_data, train_size=0.8, val_size=0.1, test_size=0.1, shuffle=True):
+        raw_train, raw_val, raw_test = utils.train_val_test_split(raw_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=shuffle)
+        event_train, event_val, event_test = utils.train_val_test_split(event_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=shuffle)
+        bases_train, bases_val, bases_test = utils.train_val_test_split(bases_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=shuffle)
         return (raw_train, raw_val, raw_test), (event_train, event_val, event_test), (bases_train, bases_val, bases_test)
 
     def pad_input_data(self, raw_data, event_data):
