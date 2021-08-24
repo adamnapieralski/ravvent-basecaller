@@ -118,8 +118,8 @@ def run_simulator_training(
     checkpoint_filepath = f'models/simulator.reduced/model.{name}/model_chp'
     basecaller.load_weights(checkpoint_filepath)
 
-    bases_sequences = basecaller.basecall_batches(test_ds)
-    print(bases_sequences.upper())
+    bases_sequences = basecaller.basecall_full(test_ds)
+    print(bases_sequences)
 
 
 if __name__ == '__main__':

@@ -1,5 +1,7 @@
 import numpy as np
 import tensorflow as tf
+from datetime import datetime
+import os
 
 from shape_checker import ShapeChecker
 
@@ -553,7 +555,7 @@ class Basecaller(tf.keras.Model):
 
         return {'base_sequences': result_base_sequences, 'attention': basecall_tokens_res['attention']}
 
-    def basecall_batches(self, data):
+    def basecall_full(self, data):
         bases_sequences = []
         for data_batch in data:
             input_data, target_sequence = utils.unpack_data_to_input_target(data_batch, self.input_data_type)
@@ -566,7 +568,24 @@ class Basecaller(tf.keras.Model):
             ]
             bases_sequences.extend(bs)
 
-        return merger.merge_chunks(bases_sequences)
+        merged_sequence = merger.merge_chunks(bases_sequences)
+        return merged_sequence.upper()
+
+    def evaluate_basecall_full_aligned(self, data, reference_fasta, basecalled_fastq=None):
+        pred_sequence = self.basecall_full(data)
+        dt_string = datetime.now().strftime("%Y.%m.%d.%H.%M.%S")
+        id_str = f'basecalled.{self.input_data_type}.{self.rnn_type}.{dt_string}'
+        if basecalled_fastq is None:
+            fastq_path = f'{id_str}.fastq'
+        else:
+            fastq_path = basecalled_fastq
+        output_alignment = 'mapping.paf'
+
+        utils.create_fastq_file(fastq_path, id_str, pred_sequence)
+        utils.run_minimap(reference_fasta, fastq_path, output_alignment)
+        acc = utils.get_accuracy_alignment_from_minimap(output_alignment)
+        os.remove(output_alignment)
+        return acc
 
     def evaluate_test_batch(self, data):
         input_data, target_sequence = utils.unpack_data_to_input_target(data, self.input_data_type)

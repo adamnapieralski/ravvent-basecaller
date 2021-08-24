@@ -2,6 +2,8 @@ import numpy as np
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle as sklearn_shuffle
+import subprocess
+import shlex
 
 from pathlib import Path
 
@@ -80,6 +82,18 @@ def get_bases_sequence_from_chiron_dir(dir: str, max_length: int = None):
 
     return bases_sequence
 
+def create_fastq_file(path, id, sequence):
+    with open(path, 'w') as f:
+        f.write(f'${id}')
+        f.write(sequence)
+
+def run_minimap(reference_fasta, basecalled_fastq, output_alignment):
+    cmd = f'minimap2 {reference_fasta} {basecalled_fastq} > {output_alignment}'
+    subprocess.run(shlex.split(cmd))
+
+def get_accuracy_alignment_from_minimap(output_alignment):
+    stats = np.loadtxt(output_alignment, dtype='object', skiprows=1)
+    return int(stats[10]) / int(stats[11])
 class BatchLogs(tf.keras.callbacks.Callback):
     def __init__(self, key):
         self.key = key
