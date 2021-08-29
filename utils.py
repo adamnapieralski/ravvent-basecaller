@@ -84,16 +84,20 @@ def get_bases_sequence_from_chiron_dir(dir: str, max_length: int = None):
 
 def create_fastq_file(path, id, sequence):
     with open(path, 'w') as f:
-        f.write(f'${id}')
+        f.write(f'@{id}\n')
         f.write(sequence)
 
 def run_minimap(reference_fasta, basecalled_fastq, output_alignment):
-    cmd = f'minimap2 {reference_fasta} {basecalled_fastq} > {output_alignment}'
-    subprocess.run(shlex.split(cmd))
+    cmd = f'minimap2 {reference_fasta} {basecalled_fastq}'
+    with open(output_alignment, 'wt') as oa:
+        subprocess.run(shlex.split(cmd), stdout=oa)
 
 def get_accuracy_alignment_from_minimap(output_alignment):
-    stats = np.loadtxt(output_alignment, dtype='object', skiprows=1)
-    return int(stats[10]) / int(stats[11])
+    with open(output_alignment, 'rt') as f:
+        entries = [x.split() for x in f.readlines()]
+    accs = [int(e[9]) / int(e[10]) for e in entries]
+    return np.mean(accs)
+
 class BatchLogs(tf.keras.callbacks.Callback):
     def __init__(self, key):
         self.key = key
