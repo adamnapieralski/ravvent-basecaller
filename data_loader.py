@@ -66,7 +66,9 @@ class DataModule():
         )
         self.output_text_processor.adapt(['A C G T'])
 
-        self.input_padding_value = INPUT_MASK
+        self.padding_value_unscaled = -1.
+        self.initial_input_padding_value = INPUT_MASK
+        self.input_padding_value = self.initial_input_padding_value
 
     def load_data_samples(self):
         if self.load_source == 'simulator':
@@ -86,7 +88,11 @@ class DataModule():
         if raw_data_split[0] is not None and event_data_split[0] is not None:
             self.fit_scalers(raw_data_split[0], event_data_split[0])
 
+        self.calculate_input_padding_value()
+
         raw_data_split, event_data_split = self.scale_input_data(raw_data_split, event_data_split)
+        raw_data_split, event_data_split = self.replace_input_padding_value(raw_data_split, event_data_split)
+
 
         bases_data_split = self.prepare_bases_data(bases_data_split)
 
@@ -124,21 +130,24 @@ class DataModule():
         return (raw_train, raw_val, raw_test), (event_train, event_val, event_test), (bases_train, bases_val, bases_test)
 
     def pad_input_data(self, raw_data, event_data):
-        raw_padded = pad_sequences(raw_data, maxlen=self.max_raw_length, dtype='float32', padding='post', truncating='post', value=self.input_padding_value)
-        event_padded = pad_sequences(event_data, maxlen=self.max_event_length, dtype='float32', padding='post', truncating='post', value=self.input_padding_value)
+        raw_padded = pad_sequences(raw_data, maxlen=self.max_raw_length, dtype='float32', padding='post', truncating='post', value=self.initial_input_padding_value)
+        event_padded = pad_sequences(event_data, maxlen=self.max_event_length, dtype='float32', padding='post', truncating='post', value=self.initial_input_padding_value)
         return raw_padded, event_padded
 
     def fit_scalers(self, raw_train, event_train, partial=False):
         if partial:
-            self.scalers['raw'].partial_fit((raw_train[raw_train != self.input_padding_value]).reshape(-1, 1))
+            self.scalers['raw'].partial_fit((raw_train[raw_train != self.initial_input_padding_value]).reshape(-1, 1))
             for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
                 vals = event_train[:,:,id]
-                self.scalers['event'][feat].partial_fit((vals[vals != self.input_padding_value]).reshape(-1, 1))
+                self.scalers['event'][feat].partial_fit((vals[vals != self.initial_input_padding_value]).reshape(-1, 1))
         else:
-            self.scalers['raw'].fit((raw_train[raw_train != self.input_padding_value]).reshape(-1, 1))
+            self.scalers['raw'].fit((raw_train[raw_train != self.initial_input_padding_value]).reshape(-1, 1))
             for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
                 vals = event_train[:,:,id]
-                self.scalers['event'][feat].fit((vals[vals != self.input_padding_value]).reshape(-1, 1))
+                self.scalers['event'][feat].fit((vals[vals != self.initial_input_padding_value]).reshape(-1, 1))
+
+    def calculate_input_padding_value(self):
+        self.input_padding_value = float(round(self.scalers['raw'].transform(np.array([[self.padding_value_unscaled]]))[0][0] - 1))
 
     def scale_input_data(self, raw_data_split, event_data_split):
         raw_scaled = []
@@ -147,9 +156,9 @@ class DataModule():
                 raw_scaled.append(None)
                 continue
             raw = np.copy(raw_it)
-            raw_no_pad = raw[raw != self.input_padding_value]
+            raw_no_pad = raw[raw != self.initial_input_padding_value]
             raw_no_pad_scaled = self.scalers['raw'].transform(raw_no_pad.reshape(-1, 1))
-            raw[raw != self.input_padding_value] = raw_no_pad_scaled.flatten()
+            raw[raw != self.initial_input_padding_value] = raw_no_pad_scaled.flatten()
             raw_scaled.append(raw)
 
         event_scaled = []
@@ -160,12 +169,32 @@ class DataModule():
             event = np.copy(event_it)
             for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
                 feat_vals = event[:,:,id]
-                feat_vals_no_pad = feat_vals[feat_vals != self.input_padding_value]
+                feat_vals_no_pad = feat_vals[feat_vals != self.initial_input_padding_value]
                 feat_vals_no_pad_scaled = self.scalers['event'][feat].transform(feat_vals_no_pad.reshape(-1, 1))
-                feat_vals[feat_vals != self.input_padding_value] = feat_vals_no_pad_scaled.flatten()
+                feat_vals[feat_vals != self.initial_input_padding_value] = feat_vals_no_pad_scaled.flatten()
                 event[:,:,id] = feat_vals
             event_scaled.append(event)
         return tuple(raw_scaled), tuple(event_scaled)
+
+    def replace_input_padding_value(self, raw_data_split, event_data_split):
+        raw_replaced = []
+        for raw_it in raw_data_split:
+            if raw_it is None:
+                raw_replaced.append(None)
+                continue
+            raw = np.copy(raw_it)
+            raw[raw == self.initial_input_padding_value] = self.input_padding_value
+            raw_replaced.append(raw)
+
+        event_replaced = []
+        for event_it in event_data_split:
+            if event_it is None:
+                event_replaced.append(None)
+                continue
+            event = np.copy(event_it)
+            event[event == self.initial_input_padding_value] = self.input_padding_value
+            event_replaced.append(event)
+        return tuple(raw_replaced), tuple(event_replaced)
 
     def prepare_bases_data(self, bases_data_split):
         bases_prep = []
@@ -249,14 +278,8 @@ class DataModule():
         return data.T
 
     def _get_event_detection_alignment_data(self, ed_ali_path: str) -> np.ndarray:
-        data = (np.loadtxt(ed_ali_path)[:, 2:4]).astype(int)
-        raw_ids, bases_ids = [], []
-        i = 1
-        for base_range in data:
-            bases_ids.extend([i] * base_range[0])
-            i += 1
-        raw_ids = [x for x in range(len(bases_ids))]
-        return np.array([raw_ids, bases_ids])
+        ranges_ids = (np.loadtxt(ed_ali_path)[:, 2:4]).astype(int)
+        return self._get_alignment_data_from_ranges_ids(ranges_ids)
 
     def _get_bases_raw_aligned_data(self, alignment_data, raw_data):
         """Get list of lists of base's raw values for each base/nucleotide"""
@@ -339,30 +362,68 @@ class DataModule():
 
         raw_samples_all, event_samples_all, bases_samples_all = [], [], []
 
-        for signal_path, label_path in zip(signals_paths, labels_paths):
-            bases_raw_aligned_data, events_sequence, bases_sequence = self._load_chiron_single_data(signal_path, label_path)
-            raw_samples, event_samples, bases_samples = zip(*self.samples_generator(bases_raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
-            raw_samples_all.extend(raw_samples)
-            event_samples_all.extend(event_samples)
-            bases_samples_all.extend(bases_samples)
+        if self.event_detection:
+            event_detection_paths = [p for p in dir.iterdir() if p.suffix == '.eventdetection']
+            event_detection_paths.sort()
+
+            for signal_path, label_path, ed_path in zip(signals_paths, labels_paths, event_detection_paths):
+                bases_raw_aligned_data, events_sequence, bases_sequence, alignment_data = self._load_chiron_single_data(signal_path, label_path, ed_path)
+                raw_samples, event_samples, bases_samples = zip(*self.samples_generator(bases_raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset, alignment_data, self.event_detection))
+                raw_samples_all.extend(raw_samples)
+                event_samples_all.extend(event_samples)
+                bases_samples_all.extend(bases_samples)
+
+        else:
+            for signal_path, label_path in zip(signals_paths, labels_paths):
+                bases_raw_aligned_data, events_sequence, bases_sequence, _ = self._load_chiron_single_data(signal_path, label_path)
+                raw_samples, event_samples, bases_samples = zip(*self.samples_generator(bases_raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
+                raw_samples_all.extend(raw_samples)
+                event_samples_all.extend(event_samples)
+                bases_samples_all.extend(bases_samples)
 
         return raw_samples_all, event_samples_all, bases_samples_all
 
+    def _get_alignment_data_from_ranges_ids(self, ranges_ids):
+        raw_ids, bases_ids = [], []
+        i = 1
+        for base_range in ranges_ids:
+            bases_ids.extend([i] * base_range[0])
+            i += 1
+        raw_ids = [x for x in range(len(bases_ids))]
+        return np.array([raw_ids, bases_ids])
 
-    def _load_chiron_single_data(self, signal_path, label_path):
+    def _get_alignment_data_from_chiron_ranges_ids(self, ranges_ids):
+        raw_ids, bases_ids = [], []
+        i = 1
+        for base_range in ranges_ids:
+            bases_ids.extend([i] * (base_range[1] - base_range[0]))
+            i += 1
+        raw_ids = [x for x in range(len(bases_ids))]
+        return np.array([raw_ids, bases_ids])
+
+    def _load_chiron_single_data(self, signal_path, label_path, ed_path=None):
         signal = np.loadtxt(signal_path)
         labels = np.loadtxt(label_path, dtype='object')
         ranges_ids = labels[:,0:2].astype('int')
         bases_sequence = labels[:,2]
 
+        signal = signal[ranges_ids[0][0]:ranges_ids[-1][1]]
+        ranges_ids -= ranges_ids[0][0] - 1
+
+        alignment_data = self._get_alignment_data_from_chiron_ranges_ids(ranges_ids)
+
         bases_raw_aligned_data = []
 
-        for base_range in ranges_ids:
-            bases_raw_aligned_data.append(signal[base_range[0]:base_range[1]])
+        if self.event_detection:
+            alignment_event_detection_data = self._get_event_detection_alignment_data(ed_path)
+            bases_raw_aligned_data = self._get_bases_raw_aligned_data(alignment_event_detection_data, signal)
+
+        else:
+            bases_raw_aligned_data = self._get_bases_raw_aligned_data(alignment_data, signal)
 
         events_sequence = self._get_events_sequence(bases_raw_aligned_data)
 
-        return bases_raw_aligned_data, events_sequence, bases_sequence
+        return bases_raw_aligned_data, events_sequence, bases_sequence, alignment_data
 
 
     def save_chiron_padded_samples(self, dir, scalers_partial_fit=False):

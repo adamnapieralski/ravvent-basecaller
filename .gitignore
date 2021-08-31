@@ -6,7 +6,9 @@ models/*
 !models/.gitkeep
 info/*
 !info/.gitkeep
+guppy_benchmark/
 .vscode
+results/
 
 *.ipynb
 .DS_Store

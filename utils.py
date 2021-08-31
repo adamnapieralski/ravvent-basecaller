@@ -2,6 +2,11 @@ import numpy as np
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle as sklearn_shuffle
+import h5py
+import subprocess
+import shlex
+import shutil
+import os
 
 from pathlib import Path
 
@@ -79,6 +84,42 @@ def get_bases_sequence_from_chiron_dir(dir: str, max_length: int = None):
             break
 
     return bases_sequence
+
+def create_fast5_from_raw_values(raw_values, boilerplate_fast5_file, fast5_path):
+    shutil.copyfile(boilerplate_fast5_file, fast5_path)
+    file = h5py.File(fast5_path, 'r+')
+    raw_dat = list(file['/Raw/Reads/'].values())[0]
+    del raw_dat['Signal']
+    raw_attrs = raw_dat.attrs
+    raw_dat.create_dataset('Signal', data=raw_values, dtype='i2', compression='gzip', compression_opts=9)  #-> with compression
+    raw_attrs['duration'] = raw_values.size
+    raw_attrs['read_id'] = 1
+    file.close()
+
+def run_event_detection(detect_events_path, fast5_path, event_detection_path):
+    cmd = f'{detect_events_path} --win-len1 5 --win-len2 13 {fast5_path}'
+    with open(event_detection_path, 'wt') as f:
+        subprocess.run(shlex.split(cmd), stdout=f)
+
+def generate_event_detection_for_chiron(chiron_dir, boilerplate_fast5_file, detect_events_path):
+    dir = Path(chiron_dir)
+    signal_paths = [p for p in dir.iterdir() if p.suffix == '.signal']
+    signal_paths.sort()
+    labels_paths = [p for p in dir.iterdir() if p.suffix == '.label']
+    labels_paths.sort()
+
+    for signal_path, label_path in zip(signal_paths, labels_paths):
+        signal = np.loadtxt(signal_path)
+        labels = np.loadtxt(label_path, dtype='object')
+        ranges_ids = labels[:,0:2].astype('int')
+        signal = signal[ranges_ids[0][0]:ranges_ids[-1][1]]
+
+        signal_fast5_path = signal_path.with_suffix('.fast5')
+        event_detection_path = signal_path.with_suffix('.eventdetection')
+        create_fast5_from_raw_values(signal, boilerplate_fast5_file, signal_fast5_path)
+        run_event_detection(detect_events_path, signal_fast5_path, event_detection_path)
+        os.remove(signal_fast5_path)
+
 
 class BatchLogs(tf.keras.callbacks.Callback):
     def __init__(self, key):

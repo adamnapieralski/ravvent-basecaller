@@ -111,7 +111,7 @@ def get_params_from_name(filename: str):
     params['PATIENCE'] = int(res.group(1))
 
     res = re.match(r'.*\.tf(\d)\..*', filename)
-    params['TEACHER_FORCING'] = bool(res.group(1))
+    params['TEACHER_FORCING'] = False # bool(res.group(1))
 
     res = re.match(r'.*\.ed(\d)\..*', filename)
     params['EVENT_DETECTION'] = bool(res.group(1))
@@ -127,7 +127,7 @@ def get_params_from_name(filename: str):
             params['RNN_TYPE'] = rnn_type
 
     for att_type in ['bahdanau', 'luong']:
-        if f'{rnn_type}.' in filename:
+        if f'{att_type}.' in filename:
             params['ATTENTION_TYPE'] = att_type
     if 'ATTENTION_TYPE' not in params:
         params['ATTENTION_TYPE'] = 'bahdanau'
@@ -175,10 +175,10 @@ def plot_attention_weights_for_prediction(model_path, input_data, save_path: str
 
     ax.matshow(att, cmap='viridis', vmin=0.0)
 
-    ax.set_xlabel('Input data')
-    ax.set_ylabel('Output bases')
+    ax.set_xlabel('Encoder outputs id')
+    ax.set_ylabel('Output bases id')
     model_details = model_path.replace('models/', '').replace('/model_chp', '')
-    plt.suptitle(f'Attention weights\n{model_details}')
+    # plt.suptitle(f'Attention weights\n{model_details}')
 
     if save_path is None:
         plt.show()
