@@ -54,7 +54,7 @@ class Encoder(tf.keras.layers.Layer):
                 merge_mode=self.bidir_merge_mode
             )
 
-    def call(self, sequence, state=None):
+    def call(self, sequence, state=None, mask=None):
         shape_checker = ShapeChecker()
         if self.data_type == 'raw':
             shape_checker(sequence, ('batch', 's', 1))
@@ -65,16 +65,16 @@ class Encoder(tf.keras.layers.Layer):
         #    output shape: (batch, s, enc_units)
         #    state shape: (batch, enc_units)
         if self.rnn_type == 'gru':
-            output, state = self.rnn(sequence, initial_state=state)
+            output, state = self.rnn(sequence, initial_state=state, mask=mask)
             shape_checker(state, ('batch', 'enc_units'))
         elif self.rnn_type == 'lstm':
-            output, state_h, state_c = self.rnn(sequence, initial_state=state)
+            output, state_h, state_c = self.rnn(sequence, initial_state=state, mask=mask)
             state = [state_h, state_c]
         elif self.rnn_type == 'bigru':
-            output, state_f, state_b = self.rnn(sequence, initial_state=state)
+            output, state_f, state_b = self.rnn(sequence, initial_state=state, mask=mask)
             state = [state_f, state_b]
         elif self.rnn_type == 'bilstm':
-            output, state_f_h, state_f_c, state_b_h, state_b_c = self.rnn(sequence, initial_state=state)
+            output, state_f_h, state_f_c, state_b_h, state_b_c = self.rnn(sequence, initial_state=state, mask=mask)
             state = [state_f_h, state_f_c, state_b_h, state_b_c]
         shape_checker(output, ('batch', 's', 'enc_units'))
 
@@ -302,6 +302,10 @@ class Basecaller(tf.keras.Model):
         self.attention_type = attention_type
         self.shape_checker = ShapeChecker()
 
+        self.grad_clip_norm = 1
+
+        print('Input padding', self.input_padding_value)
+
         self.output_token_string_from_index = (
             tf.keras.layers.experimental.preprocessing.StringLookup(
                 vocabulary=output_text_processor.get_vocabulary(),
@@ -372,10 +376,14 @@ class Basecaller(tf.keras.Model):
         # Apply an optimization step
         variables = self.trainable_variables
         gradients = tape.gradient(average_loss, variables)
+
+        # CLIPPTING
+        gradients = [tf.clip_by_norm(g, self.grad_clip_norm) for g in gradients]
+
         self.optimizer.apply_gradients(zip(gradients, variables))
 
         # Return a dict mapping metric names to current value
-        return {'batch_loss': average_loss}
+        return {'loss': average_loss}
 
     @tf.function
     def _tf_train_step(self, data):
@@ -422,7 +430,7 @@ class Basecaller(tf.keras.Model):
             target_pred_tokens = target_tokens[:, t+1:t+2]
 
             step_loss, dec_state, pred_tokens = self._loop_step(input_tokens, target_pred_tokens, input_mask, enc_output, dec_state, return_prediction_tokens=True)
-            val_loss += step_loss
+            val_loss = val_loss + step_loss
 
             # accuracy
             new_tokens = tf.where(done, tf.constant(0, dtype=tf.int64), pred_tokens)
