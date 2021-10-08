@@ -2,6 +2,11 @@ data/*
 !data/.gitkeep
 !data/generate_simulator_reduced.py
 !data/simulator-6-mers.json
+!data/simulator/
+data/simulator/random/
+data/simulator/reduced/*
+!data/simulator/reduced/*.fasta
+
 models/*
 !models/.gitkeep
 info/*
