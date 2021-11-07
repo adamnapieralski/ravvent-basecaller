@@ -304,7 +304,7 @@ class Basecaller(tf.keras.Model):
 
         self.grad_clip_norm = 1
 
-        print('Input padding', self.input_padding_value)
+        # print('Input padding', self.input_padding_value)
 
         self.output_token_string_from_index = (
             tf.keras.layers.experimental.preprocessing.StringLookup(
@@ -559,6 +559,14 @@ class Basecaller(tf.keras.Model):
         # self.shape_checker(result_base_sequences, ('batch',))
 
         return {'base_sequences': result_base_sequences, 'attention': basecall_tokens_res['attention']}
+
+    def basecall_data(self, data):
+        for raw_batch, events_batch, target_batch in data:
+            input_data, target_sequence = utils.unpack_data_to_input_target((raw_batch, events_batch, target_batch), self.input_data_type)
+            target_token_sequences = self.output_text_processor(target_sequence)
+
+            max_target_length = tf.shape(target_token_sequences)[1]
+            self.tf_basecall_batch_to_tokens(input_data, output_max_length=max_target_length, early_break=False)
 
     def evaluate_test_batch(self, data):
         input_data, target_sequence = utils.unpack_data_to_input_target(data, self.input_data_type)
