@@ -568,9 +568,9 @@ class DataGenerator(tf.keras.utils.Sequence):
             self.last_file_id = self.fetch_ids[index][0]
 
         return (
-            self.read_file[0][self.fetch_ids[index][1]:self.fetch_ids[index][2]], # raw
-            self.read_file[1][self.fetch_ids[index][1]:self.fetch_ids[index][2]], # event
-            self.read_file[2][self.fetch_ids[index][1]:self.fetch_ids[index][2]] # bases
+            tf.convert_to_tensor(self.read_file[0][self.fetch_ids[index][1]:self.fetch_ids[index][2]]), # raw
+            tf.convert_to_tensor(self.read_file[1][self.fetch_ids[index][1]:self.fetch_ids[index][2]]), # event
+            tf.convert_to_tensor(self.read_file[2][self.fetch_ids[index][1]:self.fetch_ids[index][2]]) # bases
         )
 
     def __len__(self):
