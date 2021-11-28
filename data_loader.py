@@ -450,21 +450,23 @@ class DataModule():
         signals_paths.sort()
         labels_paths = [p for p in dir.iterdir() if p.suffix == '.label']
         labels_paths.sort()
+        event_detection_paths = [None] * len(signals_paths)
+        if self.event_detection:
+            event_detection_paths = [p for p in dir.iterdir() if p.suffix == '.eventdetection']
+            event_detection_paths.sort()
 
         random_state = self.random_seed
         max_lens = []
         files_info = [] # for use in DataGenerator
 
-        for signal_path, label_path in zip(signals_paths, labels_paths):
-            bases_raw_aligned_data, events_sequence, bases_sequence = self._load_chiron_single_data(signal_path, label_path)
-            raw_samples, event_samples, bases_samples = zip(*self.samples_generator(bases_raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
+        for signal_path, label_path, ed_path in zip(signals_paths, labels_paths, event_detection_paths):
+            bases_raw_aligned_data, events_sequence, bases_sequence, alignment_data = self._load_chiron_single_data(signal_path, label_path, ed_path=ed_path)
+            raw_samples, event_samples, bases_samples = zip(*self.samples_generator(bases_raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset, alignment_data, self.event_detection))
 
             if self.verbose:
                 max_len = max(map(len, bases_samples))
                 max_lens.append(max_len)
                 print('{}: max bases seq. length: {}'.format(signal_path.stem, max_len))
-                if max_len > self.max_event_length:
-                    raise Exception('Max event length smaller than max length.')
 
             raw_samples, event_samples = self.pad_input_data(raw_samples, event_samples)
             raw_samples = np.reshape(raw_samples, (len(raw_samples), self.max_raw_length, 1))
@@ -492,17 +494,19 @@ class DataModule():
             json.dump(files_info, fi, indent=2)
 
     def transform_and_replace_chiron_saved_samples(self, samples_dir):
-        samples_dir = Path(samples_dir)
+        dir = Path(samples_dir)
         pkl_paths = [p for p in dir.iterdir() if p.suffix == '.pkl']
         pkl_paths.sort()
 
         for pkl_path in pkl_paths:
-            with open(pkl_path, 'w+b') as f:
+            raw_data, event_data, bases_data = None, None, None
+            with open(pkl_path, 'rb') as f:
+                (raw_samples, event_samples, bases_samples) = pickle.load(f)
+                raw_data, event_data =  self.scale_input_data((raw_samples,), (event_samples,))
+                bases_data = self.prepare_bases_data((bases_samples,))
+            with open(pkl_path, 'wb') as f:
                 if self.verbose:
                     print('Replacing {}'.format(pkl_path))
-                (raw_samples, event_samples, bases_samples) = pickle.load(f)
-                raw_data, event_data =  self.scale_input_data((raw_samples), (event_samples))
-                bases_data = self.prepare_bases_data((bases_samples))
                 pickle.dump((raw_data[0], event_data[0], bases_data[0]), f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
