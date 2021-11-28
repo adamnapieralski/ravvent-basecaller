@@ -484,7 +484,7 @@ class DataModule():
 
             files_info.append({
                 'path': dat_file_path.as_posix(),
-                'samples': len(raw_samples[0])
+                'samples': raw_samples.shape[0]
             })
 
         if self.verbose:

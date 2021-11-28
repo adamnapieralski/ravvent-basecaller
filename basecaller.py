@@ -56,10 +56,14 @@ class Encoder(tf.keras.layers.Layer):
 
     def call(self, sequence, state=None, mask=None):
         shape_checker = ShapeChecker()
+        # set_shape used as trick for Sequence generator passed as x data to fit() to work
+        # otherwise int(fan_in), int(fan_out) throws NoneType TypeError
         if self.data_type == 'raw':
             shape_checker(sequence, ('batch', 's', 1))
+            sequence.set_shape((None, None, 1))
         elif self.data_type == 'event':
             shape_checker(sequence, ('batch', 's', 5))
+            sequence.set_shape((None, None, 5))
 
         # 2. The GRU processes the embedding sequence.
         #    output shape: (batch, s, enc_units)
