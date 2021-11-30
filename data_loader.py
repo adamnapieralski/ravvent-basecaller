@@ -344,18 +344,6 @@ class DataModule():
         with open(path, 'rb') as scalers_file:
             self.scalers = pickle.load(scalers_file)
 
-    def save_scalers(self, path: str):
-        """Save scalers as pickle to file in path
-        """
-        with open(path, 'wb') as scalers_file:
-            pickle.dump(self.scalers, scalers_file)
-
-    def load_scalers(self, path: str):
-        """Load scalers from file pickle in path
-        """
-        with open(path, 'rb') as scalers_file:
-            self.scalers = pickle.load(scalers_file)
-
     ### chiron load source processing
 
     def _load_all_chiron_data_samples_from_dir(self, dir, substring_match=None, max_files=None):
@@ -456,7 +444,7 @@ class DataModule():
             event_detection_paths.sort()
 
         random_state = self.random_seed
-        max_lens = []
+        pct95s = []
         files_info = [] # for use in DataGenerator
 
         for signal_path, label_path, ed_path in zip(signals_paths, labels_paths, event_detection_paths):
@@ -464,9 +452,9 @@ class DataModule():
             raw_samples, event_samples, bases_samples = zip(*self.samples_generator(bases_raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset, alignment_data, self.event_detection))
 
             if self.verbose:
-                max_len = max(map(len, bases_samples))
-                max_lens.append(max_len)
-                print('{}: max bases seq. length: {}'.format(signal_path.stem, max_len))
+                pct95 = np.percentile(list(map(len, bases_samples)), 95)
+                pct95s.append(pct95)
+                print('{}: 95pct seq. length: {}'.format(signal_path.stem, round(pct95, 2)))
 
             raw_samples, event_samples = self.pad_input_data(raw_samples, event_samples)
             raw_samples = np.reshape(raw_samples, (len(raw_samples), self.max_raw_length, 1))
@@ -488,7 +476,7 @@ class DataModule():
             })
 
         if self.verbose:
-            print('Total bases seq. max len: {}'.format(max(max_lens)))
+            print('Mean bases seq. 95pct: {}'.format(np.mean(pct95s)))
 
         with open(samples_dir / 'files_info.json', 'wt') as fi:
             json.dump(files_info, fi, indent=2)
@@ -503,11 +491,43 @@ class DataModule():
             with open(pkl_path, 'rb') as f:
                 (raw_samples, event_samples, bases_samples) = pickle.load(f)
                 raw_data, event_data =  self.scale_input_data((raw_samples,), (event_samples,))
+                raw_data, event_data = self.replace_input_padding_value(raw_data, event_data)
                 bases_data = self.prepare_bases_data((bases_samples,))
             with open(pkl_path, 'wb') as f:
                 if self.verbose:
                     print('Replacing {}'.format(pkl_path))
                 pickle.dump((raw_data[0], event_data[0], bases_data[0]), f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    def split_eval_files_info_to_test_validation(val_fraction: float, eval_files_info_path: str):
+        """Used to create two new files_info_{val/test}.json files, which split chiron pickled
+        dataset samples into desired fraction
+        """
+        files_info_data = []
+        eval_samples = 0
+        with open(eval_files_info_path, 'r') as f:
+            files_info_data = json.load(f)
+            eval_samples = np.sum([fid['samples'] for fid in files_info_data])
+
+        val_dest_samples = int(val_fraction * eval_samples)
+        files_random_ids = np.arange(len(files_info_data))
+        np.random.shuffle(files_random_ids)
+        val_files_ids = []
+        val_samples = 0
+        for id in files_random_ids:
+            curr_samples = files_info_data[id]['samples']
+            if curr_samples + val_samples <= val_dest_samples:
+                val_samples += curr_samples
+                val_files_ids.append(id)
+        val_files_ids.sort()
+        test_files_ids = np.setdiff1d(np.arange(len(files_info_data)), val_files_ids)
+
+        eval_files_info_path = Path(eval_files_info_path)
+        val_files_info_path = eval_files_info_path.with_name('files_info_val.json')
+        test_files_info_path = eval_files_info_path.with_name('files_info_test.json')
+        with open(val_files_info_path, 'wt') as f:
+            json.dump([files_info_data[i] for i in val_files_ids], f, indent=2)
+        with open(test_files_info_path, 'wt') as f:
+            json.dump([files_info_data[i] for i in test_files_ids], f, indent=2)
 
 
 def text_lower_and_start_end(text):
@@ -532,10 +552,10 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.last_file_id = None
         self.files_info = None
 
-        with open(self.files_info_path, 'rb') as fi:
+        with open(self.files_info_path, 'r') as fi:
             self.files_info = json.load(fi)
 
-        self.on_epoch_end()
+        self.fetch_ids = self._compute_new_fetch_ids()
 
     def _compute_new_fetch_ids(self):
         files_ids = np.arange(len(self.files_info))
