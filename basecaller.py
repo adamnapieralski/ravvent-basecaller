@@ -76,10 +76,12 @@ class Encoder(tf.keras.layers.Layer):
             state = [state_h, state_c]
         elif self.rnn_type == 'bigru':
             output, state_f, state_b = self.rnn(sequence, initial_state=state, mask=mask)
-            state = [state_f, state_b]
+            state = tf.concat([state_f, state_b], axis=-1)
         elif self.rnn_type == 'bilstm':
             output, state_f_h, state_f_c, state_b_h, state_b_c = self.rnn(sequence, initial_state=state, mask=mask)
-            state = [state_f_h, state_f_c, state_b_h, state_b_c]
+            concat_h = tf.concat([state_f_h, state_b_h], axis=-1)
+            concat_c = tf.concat([state_f_c, state_b_c], axis=-1)
+            state = [concat_h, concat_c]
         shape_checker(output, ('batch', 's', 'enc_units'))
 
         # 3. Returns the new sequence and its state.
@@ -161,11 +163,10 @@ class DecoderOutput(typing.NamedTuple):
 
 
 class Decoder(tf.keras.layers.Layer):
-    def __init__(self, output_vocab_size, dec_units, enc_units, embedding_dim: int = 1, rnn_type: str = 'gru', bidir_merge_mode: str = 'sum', attention_type: str = 'bahdanau'):
+    def __init__(self, output_vocab_size, dec_units, embedding_dim: int = 1, rnn_type: str = 'gru', bidir_merge_mode: str = 'sum', attention_type: str = 'bahdanau'):
         super(Decoder, self).__init__()
         self.output_vocab_size = output_vocab_size
         self.dec_units = dec_units
-        self.enc_units = enc_units
         self.embedding_dim = embedding_dim
         self.rnn_type = rnn_type
         self.bidir_merge_mode = bidir_merge_mode
@@ -175,34 +176,16 @@ class Decoder(tf.keras.layers.Layer):
         self.embedding = tf.keras.layers.Embedding(self.output_vocab_size, self.embedding_dim)
 
         # For Step 2. The RNN keeps track of what's been generated so far.
-        if self.rnn_type == 'gru':
+        if 'gru' in self.rnn_type:
             self.rnn = tf.keras.layers.GRU(self.dec_units,
                                             return_sequences=True,
                                             return_state=True,
                                             recurrent_initializer='glorot_uniform')
-        elif self.rnn_type == 'lstm':
+        elif 'lstm' in self.rnn_type:
             self.rnn = tf.keras.layers.LSTM(self.dec_units,
                                             return_sequences=True,
                                             return_state=True,
                                             recurrent_initializer='glorot_uniform')
-        elif self.rnn_type == 'bigru':
-            self.uni_rnn = tf.keras.layers.GRU(self.dec_units,
-                                        return_sequences=True,
-                                        return_state=True,
-                                        recurrent_initializer='glorot_uniform')
-            self.rnn = tf.keras.layers.Bidirectional(
-                layer=self.uni_rnn,
-                merge_mode=self.bidir_merge_mode
-            )
-        elif self.rnn_type == 'bilstm':
-            self.uni_rnn = tf.keras.layers.LSTM(self.dec_units,
-                            return_sequences=True,
-                            return_state=True,
-                            recurrent_initializer='glorot_uniform')
-            self.rnn = tf.keras.layers.Bidirectional(
-                layer=self.uni_rnn,
-                merge_mode=self.bidir_merge_mode
-            )
 
         # For step 3. The RNN output will be the query for the attention layer.
         if self.attention_type == 'bahdanau':
@@ -232,18 +215,12 @@ class Decoder(tf.keras.layers.Layer):
         shape_checker(vectors, ('batch', 't', 'embedding_dim'))
 
         # Step 2. Process one step with the RNN
-        if self.rnn_type == 'gru':
+        if 'gru' in self.rnn_type:
             rnn_output, state = self.rnn(vectors, initial_state=state)
             shape_checker(state, ('batch', 'dec_units'))
-        elif self.rnn_type == 'lstm':
+        elif 'lstm' in self.rnn_type:
             rnn_output, state_h, state_c = self.rnn(vectors, initial_state=state)
             state = [state_h, state_c]
-        elif self.rnn_type == 'bigru':
-            rnn_output, state_f, state_b = self.rnn(vectors, initial_state=state)
-            state = [state_f, state_b]
-        elif self.rnn_type == 'bilstm':
-            rnn_output, state_f_h, state_f_c, state_b_h, state_b_c = self.rnn(vectors, initial_state=state)
-            state = [state_f_h, state_f_c, state_b_h, state_b_c]
 
         shape_checker(rnn_output, ('batch', 't', 'dec_units'))
 
@@ -292,7 +269,8 @@ class Basecaller(tf.keras.Model):
         # Build the encoder and decoder
         encoder_raw = Encoder(units, 'raw', rnn_type=rnn_type)
         encoder_event = Encoder(units, 'event', rnn_type=rnn_type)
-        decoder = Decoder(output_text_processor.vocabulary_size(), units, units, embedding_dim=embedding_dim, rnn_type=rnn_type, attention_type=attention_type)
+        dec_units = 2 * units if 'bi' in rnn_type else units
+        decoder = Decoder(output_text_processor.vocabulary_size(), dec_units=dec_units, embedding_dim=embedding_dim, rnn_type=rnn_type, attention_type=attention_type)
 
         self.encoder_raw = encoder_raw
         self.encoder_event = encoder_event
@@ -455,7 +433,7 @@ class Basecaller(tf.keras.Model):
             [self.output_padding_token, self.output_start_token, self.output_end_token]
         )
 
-        return {'batch_loss': average_loss, 'accuracy': accuracy}
+        return {'loss': average_loss, 'accuracy': accuracy}
 
     @tf.function
     def _tf_val_step(self, inputs):
