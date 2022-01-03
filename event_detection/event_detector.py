@@ -27,7 +27,8 @@ class EventDetector():
         self.short_detector = {
             'DEF_PEAK_POS': -1,
             'DEF_PEAK_VAL': FLT_MAX,
-            'threshold': self.params['window_length1'],
+            'threshold': self.params['threshold1'],
+            'window_length': self.params['window_length1'],
             'masked_to': 0,
             'peak_pos': -1,
             'peak_value': FLT_MAX,
@@ -37,7 +38,8 @@ class EventDetector():
         self.long_detector = {
             'DEF_PEAK_POS': -1,
             'DEF_PEAK_VAL': FLT_MAX,
-            'threshold': self.params['window_length2'],
+            'threshold': self.params['threshold2'],
+            'window_length': self.params['window_length2'],
             'masked_to': 0,
             'peak_pos': -1,
             'peak_value': FLT_MAX,
@@ -100,10 +102,9 @@ class EventDetector():
         #     self.tstat[self.d_length - i - 1] = 0
 
         i = int(self.buf_mid % self.BUF_LEN)
-        st = (self.buf_mid - w_length) % self.BUF_LEN
-        en = (self.buf_mid + w_length) % self.BUF_LEN
+        st = int((self.buf_mid - w_length) % self.BUF_LEN)
+        en = int((self.buf_mid + w_length) % self.BUF_LEN)
 
-        print(i, type(i))
         sum1 = self.sum[i] - self.sum[st]
         sumsq1 = self.sumsq[i] - self.sumsq[st]
         sum2 = float(self.sum[en] - self.sum[i])
@@ -163,14 +164,15 @@ class EventDetector():
         return False
 
     def create_event(self, evt_en):
-        evt_en_buf = evt_en % self.BUF_LEN
+        evt_en = int(evt_en)
+        evt_en_buf = int(evt_en % self.BUF_LEN)
         self.event_['start'] = self.evt_st
         self.event_['length'] = float(evt_en - self.evt_st)
         self.event_['mean'] = float(self.sum[evt_en_buf] - self.evt_st_sum) / self.event_['length']
 
         deltasqr = self.sumsq[evt_en_buf] - self.evt_st_sumsq
         var = deltasqr / self.event_['length'] - self.event_['mean'] ** 2
-        self.event_['stdv'] = math.sqrt(max(var, FLT_MAX))
+        self.event_['stdv'] = math.sqrt(max(var, FLT_MIN))
 
         self.evt_st = evt_en
         self.evt_st_sum = self.sum[evt_en_buf]
