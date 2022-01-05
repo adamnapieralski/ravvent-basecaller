@@ -16,6 +16,7 @@ class Event():
     def end(self) -> int:
         return self.start + self.length
 
+
 class EventDetector():
     def __init__(self, window_length1=3, window_length2=6, threshold1=1.4,
                  threshold2=9., peak_height=0.2):
@@ -152,14 +153,14 @@ class EventDetector():
             elif current_value - detector['peak_value'] > self.params['peak_height']:
                 # or we've seen a qualifying maximum
                 detector['peak_value'] = current_value
-                detector['peak_pos'] = self.buf_mid
+                detector['peak_pos'] = to_i32(self.buf_mid)
                 # otherwise wait to rise high enough to be considered a peak
         else:
             # Case 2: In an existing peak, waiting to see if it's good
             if current_value > detector['peak_value']:
                 # Update the peak
                 detector['peak_value'] = current_value
-                detector['peak_pos'] = self.buf_mid
+                detector['peak_pos'] = to_i32(self.buf_mid)
             # Dominate other tstat signals if we're going to fire at some point
             if detector['window_length'] == self.short_detector['window_length']:
                 if detector['peak_value'] > detector['threshold']:
@@ -172,7 +173,7 @@ class EventDetector():
             if detector['peak_value'] - current_value > self.params['peak_height'] and detector['peak_value'] > detector['threshold']:
                 detector['valid_peak'] = True
             # Finally, check the distance if this is a good peak
-            if detector['valid_peak'] and (self.buf_mid - detector['peak_pos'] > detector['window_length'] / 2):
+            if detector['valid_peak'] and (self.buf_mid - detector['peak_pos']) > detector['window_length'] / 2:
                 detector['peak_pos'] = detector['DEF_PEAK_POS']
                 detector['peak_value'] = current_value
                 detector['valid_peak'] = False
@@ -203,6 +204,11 @@ class EventDetector():
 
 def to_u32(val):
     return int(val) & 0xffffffff
+
+
+def to_i32(val):
+    n = val & 0xffffffff
+    return (n ^ 0x80000000) - 0x80000000
 
 
 if __name__ == '__main__':
