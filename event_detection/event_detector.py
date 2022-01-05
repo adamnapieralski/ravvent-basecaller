@@ -6,41 +6,23 @@ FLT_MAX = 3.40282347e+38
 
 
 class Event():
-    def __init__(self, start: int, length: int, mean: float, stdv: float
-                 ) -> None:
-        self._start = start
-        self._length = length
-        self._mean = mean
-        self._stdv = stdv
-
-    @property
-    def start(self) -> int:
-        return self._start
-
-    @property
-    def length(self) -> int:
-        return self._length
+    def __init__(self, start: int, length: int, mean: float, stdv: float) -> None:
+        self.start = start
+        self.length = length
+        self.mean = mean
+        self.stdv = stdv
 
     @property
     def end(self) -> int:
-        return self._start + self._length
-
-    @property
-    def mean(self) -> float:
-        return self._mean
-
-    @property
-    def stdv(self) -> float:
-        return self._stdv
-
+        return self.start + self.length
 
 class EventDetector():
     def __init__(self, window_length1=3, window_length2=6, threshold1=1.4,
-                 threshold2=9., peak_height=0.2, min_mean=30, max_mean=150):
+                 threshold2=9., peak_height=0.2):
         self.params = {
             'window_length1': window_length1, 'window_length2': window_length2,
-            'threshold1': threshold1, 'threshold2': threshold2,
-            'peak_height': peak_height, 'min_mean': min_mean, 'max_mean': max_mean
+            'threshold1': threshold1, 'threshold2': threshold2, 'peak_height': peak_height,
+            # 'min_mean': min_mean, 'max_mean': max_mean
         }
         self.BUF_LEN = 1 + self.params['window_length2'] * 2
         self.sum = np.zeros(shape=(self.BUF_LEN), dtype=np.float64)
@@ -113,7 +95,8 @@ class EventDetector():
         if p1 or p2:
             self._create_event(
                 self.buf_mid - self.params['window_length1'] + 1)
-            return self._event.mean >= self.params['min_mean'] and self._event.mean <= self.params['max_mean']
+            return True
+            # return self._event.mean >= self.params['min_mean'] and self._event.mean <= self.params['max_mean']
 
         return False
 
