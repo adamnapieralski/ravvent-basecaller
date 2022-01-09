@@ -94,9 +94,8 @@ class EventDetector():
         p2 = self._detect_peak(tstat2, self.long_detector)
 
         if p1 or p2:
-            self._create_event(
+            return self._create_event(
                 self.buf_mid - self.params['window_length1'] + 1)
-            return True
             # return self._event.mean >= self.params['min_mean'] and self._event.mean <= self.params['max_mean']
 
         return False
@@ -186,6 +185,8 @@ class EventDetector():
         evt_en_buf = to_u32(evt_en % self.BUF_LEN)
         start_ = self.evt_st
         length_ = float(evt_en - self.evt_st)
+        if length_ < FLT_MIN:
+            return False
         mean_ = float(
             self.sum[evt_en_buf] - self.evt_st_sum) / length_
 
@@ -200,7 +201,7 @@ class EventDetector():
         self.evt_st = evt_en
         self.evt_st_sum = self.sum[evt_en_buf]
         self.evt_st_sumsq = self.sumsq[evt_en_buf]
-
+        return True
 
 def to_u32(val):
     return int(val) & 0xffffffff
@@ -210,14 +211,3 @@ def to_i32(val):
     n = val & 0xffffffff
     return (n ^ 0x80000000) - 0x80000000
 
-
-if __name__ == '__main__':
-    ed = EventDetector(max_mean=1200, min_mean=100)
-
-    raw = np.loadtxt(
-        'aa0040f4-7e54-42c0-aa0a-902edc8bb810.signal', dtype=np.float32)
-    events = ed.run(raw)
-
-    for e in events:
-        print('{}\t{}\t{}\t{}'.format(
-            e.mean, e.stdv, e.length, e.start))
