@@ -59,6 +59,27 @@ def evaluate_all_dir(dir_path, results_path):
         with open(results_path, 'wb') as f:
             pickle.dump(results, f)
 
+def get_best_params(results_paths):
+    data_all = []
+    for res_path in results_paths:
+        with open(res_path, 'rb') as f:
+            data_all.append(pickle.load(f))
+
+    results = {}
+    for k in data_all[0][0]['ed'].keys():
+        results[k] = []
+
+    for data in data_all:
+        for d in data:
+            ref_len = d['ref_len']
+            for k,v in d['ed'].items():
+                results[k].append((v - ref_len) / ref_len)
+    for k in results.keys():
+        results[k] = np.abs(np.mean(results[k]))
+
+    return list(results.keys())[np.argmin(list(results.values()))]
 
 if __name__ == '__main__':
-    evaluate_all_dir('../data/chiron/train/ecoli_0001_0002', '../data/chiron/train/ecoli_0001_0002/ed_param_search.pkl')
+    evaluate_all_dir('../data/chiron/ecoli/train', '../data/chiron/ecoli/train/ed_param_search.pkl')
+    best = get_best_params(['../data/chiron/ecoli/train/ed_param_search.pkl', '../data/chiron/lambda/train/all/ed_param_search.pkl'])
+    print(best)
