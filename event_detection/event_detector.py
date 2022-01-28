@@ -1,3 +1,9 @@
+"""Classes for performing event detection on nanopore raw signal data
+Based on:
+- Scrappie (past ONT basecaller) https://github.com/nanoporetech/scrappie
+- event_detection https://github.com/skovaka/event_detection
+"""
+
 import numpy as np
 import math
 
