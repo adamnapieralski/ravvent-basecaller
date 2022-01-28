@@ -6,7 +6,8 @@ Basecaller, called Ravvent, using joint raw and event data sequence-to-sequence 
 - [data_loader.py](data_loader.py) - includes DataGenerator class responsible for loading simulated and real data, then preprocessing it into final batches, consumable by model
 - [basecaller.py](basecaller.py) - includes Encoder, Decoder classes, and general Basecaller class, combining all layers into single keras Model responsible for learning and performing basecalling task
 - [utils.py](utils.py) - includes various utilities functions
-- [ravvent.py](ravvent.py), [run_simulator_reduced.py](run_simulator_reduced.py) - sample scripts for running learning and evaluating model pipeline
+- [ravvent.py](ravvent.py) - sample script for running learning model pipeline
+- [ravvent_mapping_evaluator.py](ravvent_mapping_evaluator.py), [ravvent_performance_evaluator.py](ravvent_performance_evaluator.py) - scripts for performing evaluation (read accuracy, speed)
 
 ## Data availability
 ### Simulated
