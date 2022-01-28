@@ -93,7 +93,7 @@ def create_fast5_from_raw_values(raw_values, boilerplate_fast5_file, fast5_path)
     raw_attrs = raw_dat.attrs
     raw_dat.create_dataset('Signal', data=raw_values, dtype='i2', compression='gzip', compression_opts=9)  #-> with compression
     raw_attrs['duration'] = raw_values.size
-    raw_attrs['read_id'] = 1
+    raw_attrs['read_id'] = '1'
     file.close()
 
 def run_event_detection(detect_events_path, fast5_path, event_detection_path):
