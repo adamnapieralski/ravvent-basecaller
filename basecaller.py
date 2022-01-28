@@ -119,8 +119,8 @@ class BahdanauAttention(tf.keras.layers.Layer):
             mask=[query_mask, value_mask],
             return_attention_scores = True,
         )
-        shape_checker(context_vector, ('batch', 't', 'value_units'))
-        shape_checker(attention_weights, ('batch', 't', 's'))
+        # shape_checker(context_vector, ('batch', 't', 'value_units'))
+        # shape_checker(attention_weights, ('batch', 't', 's'))
 
         return context_vector, attention_weights
 
@@ -173,7 +173,8 @@ class Decoder(tf.keras.layers.Layer):
         self.attention_type = attention_type
 
         # For Step 1. The embedding layer convets token IDs to vectors
-        self.embedding = tf.keras.layers.Embedding(self.output_vocab_size, self.embedding_dim)
+        self.embedding = lambda ids: tf.one_hot(ids, depth=self.output_vocab_size)
+        # tf.keras.layers.Embedding(self.output_vocab_size, self.embedding_dim)
 
         # For Step 2. The RNN keeps track of what's been generated so far.
         if 'gru' in self.rnn_type:
@@ -445,16 +446,16 @@ class Basecaller(tf.keras.Model):
 
     def _sample_prediction_masked(self, logits, temperature):
         # 't' is usually 1 here.
-        self.shape_checker(logits, ('batch', 't', 'vocab'))
-        self.shape_checker(self.test_token_mask, ('vocab',))
+        # self.shape_checker(logits, ('batch', 't', 'vocab'))
+        # self.shape_checker(self.test_token_mask, ('vocab',))
 
         token_mask = self.test_token_mask[tf.newaxis, tf.newaxis, :]
-        self.shape_checker(token_mask, ('batch', 't', 'vocab'), broadcast=True)
+        # self.shape_checker(token_mask, ('batch', 't', 'vocab'), broadcast=True)
 
         # Set the logits for all masked tokens to -inf, so they are never chosen.
         logits = tf.where(self.test_token_mask, -np.inf, logits)
         pred_tokens = self._sample_prediction(logits, temperature)
-        self.shape_checker(pred_tokens, ('batch', 't'))
+        # self.shape_checker(pred_tokens, ('batch', 't'))
         return pred_tokens
 
     def basecall_batch_to_tokens(self, input_data, *, output_max_length=100, temperature=1.0, early_break=True):
@@ -463,13 +464,14 @@ class Basecaller(tf.keras.Model):
         # Initialize the decoder
         dec_state = enc_state
         new_tokens = tf.fill([batch_size, 1], self.output_start_token)
-        self.shape_checker(new_tokens, ('batch', 't1'))
+        # self.shape_checker(new_tokens, ('batch', 't1'))
 
         # Initialize the accumulators
         result_tokens = tf.TensorArray(tf.int64, size=1, dynamic_size=True)
         attention = tf.TensorArray(tf.float32, size=1, dynamic_size=True)
+        logits = tf.TensorArray(tf.float32, size=1, dynamic_size=True)
         done = tf.zeros([batch_size, 1], dtype=tf.bool)
-        self.shape_checker(done, ('batch', 't1'))
+        # self.shape_checker(done, ('batch', 't1'))
 
         # write start tokens at the beginning
         result_tokens = result_tokens.write(0, new_tokens)
@@ -485,7 +487,7 @@ class Basecaller(tf.keras.Model):
 
             self.shape_checker(dec_result.attention_weights, ('batch', 't1', 's'))
             attention = attention.write(t, dec_result.attention_weights)
-
+            logits = logits.write(t, dec_result.logits)
             new_tokens = self._sample_prediction_masked(dec_result.logits, temperature)
             self.shape_checker(dec_result.logits, ('batch', 't1', 'vocab'))
             self.shape_checker(new_tokens, ('batch', 't1'))
@@ -516,7 +518,11 @@ class Basecaller(tf.keras.Model):
         attention_stack = tf.transpose(attention_stack, [1, 0, 2])
         # self.shape_checker(attention_stack, ('batch', 't', 's'))
 
-        return {'token_sequences': result_tokens, 'attention': attention_stack}
+        logits_stack = logits.stack()
+        logits_stack = tf.squeeze(logits_stack, 2)
+        logits_stack = tf.transpose(logits_stack, [1, 0 2])
+
+        return {'token_sequences': result_tokens, 'attention': attention_stack, 'logits': logits_stack}
 
     @tf.function
     def tf_basecall_batch_to_tokens(self, input_data, output_max_length=100, early_break=True):
@@ -662,7 +668,7 @@ class Basecaller(tf.keras.Model):
 
         elif self.input_data_type == 'raw':
             enc_output, enc_state = self.encoder_raw(input_data)
-            self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
+            # self.shape_checker(enc_output, ('batch', 's', 'enc_units'))
             # self.shape_checker(enc_state, ('batch', 'enc_units'))
             batch_size = tf.shape(input_data)[0]
 

@@ -279,18 +279,20 @@ class DataModule():
         return data.T
 
     def _get_event_detection_alignment_data(self, ed_ali_path: str, ranges_ids=None) -> np.ndarray:
-        ev_ranges_ids = (np.loadtxt(ed_ali_path)[:, 2:4]).astype(int)
+        if self.load_source == 'tayiaki':
+            ev_ranges_ids = (np.loadtxt(ed_ali_path)[:, 2:4]).astype(int)
 
-        # !!! for use with tayiaki - eventdetection run on full fast5, while label is trimmed on the ends
-        new_ev_ranges = ev_ranges_ids[np.logical_and(ev_ranges_ids[:,1] >= ranges_ids[0,0], ev_ranges_ids[:,1] < ranges_ids[-1,1]), :]
-        new_ev_ranges[0,0] = new_ev_ranges[0,0] + new_ev_ranges[0,1] - ranges_ids[0,0]
+            # !!! for use with tayiaki - eventdetection run on full fast5, while label is trimmed on the ends
+            new_ev_ranges = ev_ranges_ids[np.logical_and(ev_ranges_ids[:,1] >= ranges_ids[0,0], ev_ranges_ids[:,1] < ranges_ids[-1,1]), :]
+            new_ev_ranges[0,0] = new_ev_ranges[0,0] + new_ev_ranges[0,1] - ranges_ids[0,0]
 
-        new_ev_ranges[0][1] = ranges_ids[0][0]
-        new_ev_ranges[-1][0] = ranges_ids[-1][1] - new_ev_ranges[-1][1]
+            new_ev_ranges[0][1] = ranges_ids[0][0]
+            new_ev_ranges[-1][0] = ranges_ids[-1][1] - new_ev_ranges[-1][1]
 
-        return self._get_alignment_data_from_ranges_ids(new_ev_ranges)
-
-        # return self._get_alignment_data_from_ranges_ids(ranges_ids)
+            return self._get_alignment_data_from_ranges_ids(new_ev_ranges)
+        else:
+            ranges_ids = (np.loadtxt(ed_ali_path)[:, 2:4]).astype(int)
+            return self._get_alignment_data_from_ranges_ids(ranges_ids)
 
     def _get_bases_raw_aligned_data(self, alignment_data, raw_data):
         """Get list of lists of base's raw values for each base/nucleotide"""
@@ -421,11 +423,11 @@ class DataModule():
         ranges_ids = labels[:,0:2].astype('int')
         bases_sequence = labels[:,2]
 
-        signal = signal[ranges_ids[0][0]:ranges_ids[-1][1]]
-        ranges_ids_shifted = ranges_ids - (ranges_ids[0][0] - 1)
-
         sc = StandardScaler()
         signal = sc.fit_transform(signal.reshape(-1, 1)).flatten()
+
+        signal = signal[ranges_ids[0][0]:ranges_ids[-1][1]]
+        ranges_ids_shifted = ranges_ids - (ranges_ids[0][0] - 1)
 
         alignment_data = self._get_alignment_data_from_chiron_ranges_ids(ranges_ids_shifted)
 
@@ -442,7 +444,7 @@ class DataModule():
 
         return bases_raw_aligned_data, events_sequence, bases_sequence, alignment_data
 
-    def get_dataset_from_single_chiron(self, signal_path):
+    def get_dataset_from_single_chiron(self, signal_path, batched=True):
         signal_path = Path(signal_path)
         label_path = signal_path.with_suffix('.label')
         ed_path = signal_path.with_suffix('.eventdetection')
@@ -454,11 +456,14 @@ class DataModule():
         raw_data = np.reshape(raw_data, (len(raw_data), self.max_raw_length, 1))
         bases_data = [' '.join(bases_sample) for bases_sample in bases_samples]
 
-        return tf.data.Dataset.from_tensor_slices((raw_data, event_data, bases_data)).batch(self.batch_size, drop_remainder=True)
+        ds = tf.data.Dataset.from_tensor_slices((raw_data, event_data, bases_data))
+        if batched:
+            return ds.batch(self.batch_size, drop_remainder=True)
+        return ds
 
-    def save_chiron_padded_samples(self, dir, scalers_partial_fit=False):
+    def save_chiron_padded_samples(self, dir, scalers_partial_fit=False, shuffle=True):
         dir = Path(dir)
-        samples_dir = dir / f'samples.rawmax{self.max_raw_length}.evmax{self.max_event_length}.offset{self.bases_offset}'
+        samples_dir = dir / f'samples.rawmax{self.max_raw_length}.evmax{self.max_event_length}.offset{self.bases_offset}.shuffle{int(shuffle)}'
         samples_dir.mkdir(parents=True, exist_ok=True)
 
         signals_paths = [p for p in dir.iterdir() if p.suffix == '.signal']
@@ -474,8 +479,8 @@ class DataModule():
         pct95s = []
         files_info = [] # for use in DataGenerator
 
-        with open(samples_dir / 'files_info.json', 'rt') as fi:
-            files_info = json.load(fi)
+        # with open(samples_dir / 'files_info.json', 'rt') as fi:
+        #     files_info = json.load(fi)
 
         for signal_path, label_path, ed_path in zip(signals_paths, labels_paths, event_detection_paths):
             if signal_path.stem in [e['path'].split('/')[3][0:-4] for e in files_info]:
@@ -490,7 +495,12 @@ class DataModule():
 
             raw_samples, event_samples = self.pad_input_data(raw_samples, event_samples)
             raw_samples = np.reshape(raw_samples, (len(raw_samples), self.max_raw_length, 1))
-            raw_samples, event_samples, bases_samples = sklearn_shuffle(raw_samples, event_samples, bases_samples, random_state=random_state)
+
+            bases_data = self.prepare_bases_data((bases_samples,))
+            bases_data = bases_data[0]
+
+            if shuffle:
+                raw_samples, event_samples, bases_samples = sklearn_shuffle(raw_samples, event_samples, bases_samples, random_state=random_state)
 
             if scalers_partial_fit:
                 self.fit_scalers(raw_samples, event_samples, partial=True)
@@ -500,7 +510,7 @@ class DataModule():
             dat_file_path = samples_dir / f'{signal_path.stem}.pkl'
 
             with open(dat_file_path, 'wb') as f:
-                pickle.dump((raw_samples, event_samples, bases_samples), f, protocol=pickle.HIGHEST_PROTOCOL)
+                pickle.dump((raw_samples, event_samples, bases_data), f, protocol=pickle.HIGHEST_PROTOCOL)
 
             files_info.append({
                 'path': dat_file_path.as_posix(),
@@ -598,6 +608,9 @@ class DataGenerator(tf.keras.utils.Sequence):
     def _compute_new_fetch_ids(self):
         files_ids = np.arange(len(self.files_info))
 
+        if self.size_scaler < 1:
+            files_ids = files_ids[0:int(self.size_scaler * len(files_ids))]
+
         if self.shuffle:
             np.random.shuffle(files_ids)
 
@@ -632,7 +645,7 @@ class DataGenerator(tf.keras.utils.Sequence):
         )
 
     def __len__(self):
-        return int(len(self.fetch_ids) * self.size_scaler)
+        return len(self.fetch_ids)
 
     def on_epoch_end(self):
         """Updates indexes after each epoch
