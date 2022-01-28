@@ -1,486 +1,261 @@
-import numpy as np
 import tensorflow as tf
-import pickle
-
-from tensorflow.keras.layers.experimental import preprocessing
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-
-from pathlib import Path
+import numpy as np
+import json
 from sklearn.preprocessing import StandardScaler
-from sklearn.utils import shuffle as sklearn_shuffle
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from keras.preprocessing.text import Tokenizer
+from pathlib import Path
 
-from ont_fast5_api.fast5_interface import get_fast5_file
-
-import utils
+from event_detection.event_detector import EventDetector
 
 
-INPUT_MASK = tf.float32.max
+ED_WINDOW_LENGTH_1 = 6
+ED_WINDOW_LENGTH_2 = 9
+INPUT_PADDING = 0.
 
-class DataModule():
-    def __init__(
-        self, dir: str, max_raw_length: int, max_event_length:int, bases_offset: int = 1, batch_size: int = 64,
-        train_size: float = 0.8, val_size: float = 0.1, test_size: float = 0.1, load_source: str = 'simulator',
-        event_detection: bool = False, random_seed: int = 0, verbose: bool = False):
-        '''Initialize DataModule
-            Parameters:
-                dir (str): directory to load data from (dependent on load_source)
-                max_raw_length (int):
-                max_event_length (int):
-                bases_offset (int): Number of bases between following data rows
-                batch_size (int): Number of data rows in batch
-                data_type (str): Data type - allowed values: "raw", "event"
-                load_source (str): supported 'simulator'/'chiron'
-                event_detection (bool): should use event_detection output for data preparation
-                random_seed (int): Random seed
-        '''
-        self.dir = dir
-        self.max_raw_length = max_raw_length
-        self.max_event_length = max_event_length
-        self.bases_offset= bases_offset
+MAX_RAW_LEN = 200
+MAX_EVENT_LEN = 30
+
+
+nuc_tk = Tokenizer(filters='', lower=True, char_level=True, split='')
+nuc_tk.word_index = {'': 0, '^': 1, '$': 2, 'a': 3, 'c': 4, 'g': 5, 't': 6}
+nuc_tk.index_word = {v: k for k, v in nuc_tk.word_index.items()}
+
+NUC_TOKEN_END = nuc_tk.word_index['^']
+NUC_TOKEN_START = nuc_tk.word_index['$']
+NUC_TOKEN_PAD = nuc_tk.word_index['']
+
+
+def compute_fitting_event_ranges(events_lens, stride, raw_max_len=200):
+    """Returns array with two elements row ([start_id, end_id (exclusive)]) of events,
+    so that total lengts of events in ranges <= raw_max_len
+    Length of return array is a bit smaller than initial number of events, since last ones don't
+    make up enough range
+    """
+    cum_lens = np.cumsum(events_lens, axis=0, dtype=np.int32)
+
+    range_ids = []
+    for i in range(0, len(events_lens), stride):
+        end_id = np.argmax(cum_lens > raw_max_len)
+        if end_id == 0:
+            break
+        range_ids.append((i, end_id))
+        if (i + stride - 1) >= len(cum_lens):
+            break
+        cum_lens -= cum_lens[i + stride - 1]
+    return np.array(range_ids)
+
+def convert_events_ranges_to_raw_ranges(events_ranges, events):
+    return np.column_stack(
+        (events[:,0][events_ranges[:,0]].astype(np.int32), events[:,0][events_ranges[:,1] - 1].astype(np.int32)) # -1 here relates to events_ranges being end-exclusive
+    )
+
+def convert_ranges_to_id_sequence(ranges):
+    ids_lens = ranges[:,1] - ranges[:,0]
+    core_id_seq = np.repeat(
+        np.arange(ranges.shape[0]), ids_lens)
+    if ranges[0,0] == 0:
+        return core_id_seq
+
+    return np.concatenate(
+        (np.full(ranges[0,0], -1), core_id_seq)
+    )
+
+def get_subseqs_included_in_ranges(seq, ranges):
+    subseqs = []
+    for range in ranges:
+        subseqs.append(seq[range[0]:range[1]])
+    return subseqs
+
+def prepare_snippets(raw, nuc_raw_ranges, nuc_reference_symbols, stride):
+    event_detector = EventDetector(window_length1=ED_WINDOW_LENGTH_1, window_length2=ED_WINDOW_LENGTH_2)
+    events = event_detector.run(raw)
+
+    events = np.array([
+        (e.start, e.end, e.length, e.mean, e.stdv, e.mean ** 2,
+         e.mean - events[i - 1].mean if i != 0 else 0) for i, e in enumerate(events)])
+
+    events_scaler = StandardScaler()
+    events_scaler.fit(events[:,2:])
+
+    # align events to reference nuc sequence
+    events = events[np.logical_and(events[:,0] >= nuc_raw_ranges[0,0], events[:,1] <= nuc_raw_ranges[-1,1]), :]
+
+    events[0,2] += events[0,0] - nuc_raw_ranges[0,0]
+    events[0,0] = nuc_raw_ranges[0,0]
+
+    events[-1,2] = nuc_raw_ranges[-1,1] - events[-1,0]
+
+    std_sc = StandardScaler()
+    raw_sc = std_sc.fit_transform(raw.reshape(-1,1))
+
+    events_ranges = compute_fitting_event_ranges(events[:, 2], stride, raw_max_len=MAX_RAW_LEN)
+
+    raw_ranges = convert_events_ranges_to_raw_ranges(events_ranges, events)
+
+    events_sc = events_scaler.transform(events[:,2:])
+
+    raw_snippets = get_subseqs_included_in_ranges(raw_sc, raw_ranges)
+    event_snippets = get_subseqs_included_in_ranges(events_sc, events_ranges)
+
+    nuc_reference_id_seq = convert_ranges_to_id_sequence(nuc_raw_ranges)
+    nuc_id_snippets = get_subseqs_included_in_ranges(nuc_reference_id_seq, raw_ranges)
+    nuc_id_snippets = [np.unique(id_snipp) for id_snipp in nuc_id_snippets]
+    nuc_sym_snippets = [
+        '$' + ''.join(nuc_reference_symbols[ids]) + '^'
+        for ids in nuc_id_snippets]
+
+    return raw_snippets, event_snippets, nuc_sym_snippets
+
+def pad_input_snippets(snippets, maxlen):
+    return pad_sequences(snippets, maxlen=maxlen, dtype='float32', padding='post', truncating='post', value=INPUT_PADDING)
+
+def load_data_from_single_signal_label(signal_path, label_path, stride):
+    raw = np.loadtxt(signal_path, dtype=int)
+    label = np.loadtxt(label_path, dtype=object)
+    nuc_raw_ranges = label[:, :2].astype(int)
+    nuc_reference_symbols = label[:,2]
+
+    raw_snippets, event_snippets, nuc_sym_snippets = prepare_snippets(raw, nuc_raw_ranges, nuc_reference_symbols, stride)
+    raw_snippets = pad_input_snippets(raw_snippets, MAX_RAW_LEN)
+    event_snippets = pad_input_snippets(event_snippets, MAX_EVENT_LEN)
+
+    nuc_tk_snippets = nuc_tk.texts_to_sequences(nuc_sym_snippets)
+    nuc_tk_snippets = pad_sequences(nuc_tk_snippets, maxlen=None, padding='post', value=NUC_TOKEN_PAD, dtype='int64')
+
+    return raw_snippets, event_snippets, nuc_tk_snippets
+
+
+def create_files_info(files_dir, stride=6, verbose=True):
+    dir = Path(files_dir)
+    files_info_path = dir / f'files_info.snippets.stride_{stride}.json'
+
+    signals_paths = [p for p in dir.iterdir() if p.suffix == '.signal']
+    signals_paths.sort()
+    labels_paths = [p for p in dir.iterdir() if p.suffix == '.label']
+    labels_paths.sort()
+
+    files_info = [] # for use in DataGenerator
+
+    for signal_path, label_path in zip(signals_paths, labels_paths):
+        raw_snippets, _, _ = load_data_from_single_signal_label(signal_path, label_path, stride)
+
+        if verbose:
+            print('{}'.format(signal_path.stem))
+
+        files_info.append({
+            'signal_path': signal_path.as_posix(),
+            'label_path': label_path.as_posix(),
+            'snippets_num': raw_snippets.shape[0]
+        })
+
+        with open(files_info_path, 'wt') as fi:
+            json.dump(files_info, fi, indent=2)
+
+    with open(files_info_path, 'wt') as fi:
+        json.dump(files_info, fi, indent=2)
+
+def split_eval_files_info_into_test_validation(val_fraction: float, eval_files_info_path: str):
+    """Used to create two new files_info_{val/test}.json files, which split files into desired shuffled fractions
+    """
+    files_info_data = []
+    with open(eval_files_info_path, 'r') as f:
+        files_info_data = json.load(f)
+
+    files_random_ids = np.arange(len(files_info_data))
+    np.random.shuffle(files_random_ids)
+
+    val_files_ids = files_random_ids[:int(val_fraction * len(files_random_ids))]
+    test_files_ids = files_random_ids[int(val_fraction * len(files_random_ids)):]
+
+    val_files_info_path = eval_files_info_path.replace('eval', 'val')
+    test_files_info_path = eval_files_info_path.replace('eval', 'test')
+
+    with open(val_files_info_path, 'wt') as f:
+        json.dump([files_info_data[i] for i in val_files_ids], f, indent=2)
+    with open(test_files_info_path, 'wt') as f:
+        json.dump([files_info_data[i] for i in test_files_ids], f, indent=2)
+
+
+class RawEventNucDataGenerator(tf.keras.utils.Sequence):
+    def __init__(self, files_info_path, stride, batch_size=128, shuffle=True, initial_random_seed=0, size_scaler=1):
+        """
+        file_info_path (str): json file including array of info objects about data files (format: [{'signal_path', 'label_path', 'snippets_num'},])
+        batch_size (int): batch size
+        shuffle (bool): should files and batches inside them be shuffled between epochs
+        """
         self.batch_size = batch_size
-        self.train_size = train_size
-        self.val_size = val_size
-        self.test_size = test_size
-        self.load_source = load_source
-        self.event_detection = event_detection
-        self.random_seed = random_seed if random_seed != 0 else np.random.randint(1)
-        self.verbose = verbose
+        self.stride = stride
+        self.files_info_path = files_info_path
+        self.shuffle = shuffle
+        self.fetch_ids = None
+        self.single_data_loaded = None
 
-        self.scalers = {
-            'raw': StandardScaler(),
-            'event': {
-                'mean': StandardScaler(),
-                'std': StandardScaler(),
-                'length': StandardScaler(),
-                'd_mean': StandardScaler(),
-                'sq_mean': StandardScaler(),
-            }
-        }
+        self.last_file_id = None
+        self.files_info = None
 
-        self.dataset_train = None
-        self.dataset_val = None
-        self.dataset_test = None
+        self.random_seed = initial_random_seed
+        self.rng = np.random.default_rng(self.random_seed)
 
-        self.output_text_processor = preprocessing.TextVectorization(
-            standardize=text_lower_and_start_end,
+        self.size_scaler = size_scaler
+
+        with open(self.files_info_path, 'r') as fi:
+            self.files_info = json.load(fi)
+
+        self.fetch_ids = self._compute_new_fetch_ids()
+
+    def _compute_new_fetch_ids(self):
+        files_ids = np.arange(len(self.files_info))
+
+        if self.size_scaler < 1:
+            files_ids = files_ids[0:int(self.size_scaler * len(files_ids))]
+
+        if self.shuffle:
+            self.rng.shuffle(files_ids)
+
+        fetch_ids = []
+        for f_id in files_ids:
+            snippets_num = self.files_info[f_id]['snippets_num']
+            batches_num = snippets_num // self.batch_size
+            start_ids = np.arange(0, self.batch_size * batches_num, self.batch_size)
+
+            if self.shuffle:
+                self.rng.shuffle(start_ids)
+
+            fetch_ids.extend(
+                [(f_id, sid, sid+self.batch_size) for sid in start_ids]
+            )
+        return np.array(fetch_ids, dtype='int')
+
+    def __getitem__(self, index):
+        """Generate one batch of data
+        """
+
+        # if fetched file id changes
+        if self.fetch_ids[index][0] != self.last_file_id:
+            self.single_data_loaded = load_data_from_single_signal_label(
+                self.files_info[self.fetch_ids[index][0]]['signal_path'],
+                self.files_info[self.fetch_ids[index][0]]['label_path'],
+                self.stride)
+            self.last_file_id = self.fetch_ids[index][0]
+
+        return (
+            tf.convert_to_tensor(self.single_data_loaded[0][self.fetch_ids[index][1]:self.fetch_ids[index][2]]), # raw
+            tf.convert_to_tensor(self.single_data_loaded[1][self.fetch_ids[index][1]:self.fetch_ids[index][2]]), # event
+            tf.convert_to_tensor(self.single_data_loaded[2][self.fetch_ids[index][1]:self.fetch_ids[index][2]]), # nuc
         )
-        self.output_text_processor.adapt(['A C G T'])
 
-        self.padding_value_unscaled = -1.
-        self.initial_input_padding_value = INPUT_MASK
-        self.input_padding_value = self.initial_input_padding_value
+    def __len__(self):
+        return len(self.fetch_ids)
 
-    def load_data_samples(self):
-        if self.load_source == 'simulator':
-            raw_aligned_data, events_sequence, bases_sequence, alignment_data = self._load_simulator_data(self.dir, event_detection=self.event_detection)
-            raw_samples, event_samples, bases_samples = zip(*self.samples_generator(raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset, alignment_data, self.event_detection))
-        elif self.load_source == 'chiron':
-            raw_samples, event_samples, bases_samples = self._load_all_chiron_data_samples_from_dir(self.dir)
-
-        return raw_samples, event_samples, bases_samples
-
-    def process_and_split_data_samples(self, raw_samples, event_samples, bases_samples):
-        raw_data, event_data = self.pad_input_data(raw_samples, event_samples)
-        raw_data = np.reshape(raw_data, (len(raw_data), self.max_raw_length, 1))
-        raw_data_split, event_data_split, bases_data_split = self.train_val_test_split(raw_data, event_data, bases_samples, train_size=self.train_size, val_size=self.val_size, test_size=self.test_size)
-
-        # scaling
-        if raw_data_split[0] is not None and event_data_split[0] is not None:
-            self.fit_scalers(raw_data_split[0], event_data_split[0])
-
-        self.calculate_input_padding_value()
-
-        raw_data_split, event_data_split = self.scale_input_data(raw_data_split, event_data_split)
-        raw_data_split, event_data_split = self.replace_input_padding_value(raw_data_split, event_data_split)
-
-
-        bases_data_split = self.prepare_bases_data(bases_data_split)
-
-        return raw_data_split, event_data_split, bases_data_split
-
-    def save_to_datasets(self, raw_data_split, event_data_split, bases_data_split):
-        if self.train_size > 0:
-            self.dataset_train = tf.data.Dataset.from_tensor_slices((raw_data_split[0], event_data_split[0], bases_data_split[0])).batch(self.batch_size, drop_remainder=True)
-        else:
-            self.dataset_train = None
-        if self.val_size > 0:
-            self.dataset_val = tf.data.Dataset.from_tensor_slices((raw_data_split[1], event_data_split[1], bases_data_split[1])).batch(self.batch_size, drop_remainder=True)
-        else:
-            self.dataset_val = None
-        if self.test_size > 0:
-            self.dataset_test = tf.data.Dataset.from_tensor_slices((raw_data_split[2], event_data_split[2], bases_data_split[2])).batch(self.batch_size, drop_remainder=True)
-        else:
-            self.dataset_test = None
-
-    def setup(self):
-        raw_samples, event_samples, bases_samples = self.load_data_samples()
-        raw_data_split, event_data_split, bases_data_split = self.process_and_split_data_samples(raw_samples, event_samples, bases_samples)
-        self.save_to_datasets(raw_data_split, event_data_split, bases_data_split)
-
-        if self.verbose:
-            print('Max bases seq. length: {}'.format(max(map(len, bases_samples))))
-            print('Train samples:\t{}, batches:\t{}'.format(0 if bases_data_split[0] == None else len(bases_data_split[0]), 0 if self.dataset_train == None else tf.data.experimental.cardinality(self.dataset_train).numpy()))
-            print('Val samples:\t{}, batches:\t{}'.format(0 if bases_data_split[1] == None else len(bases_data_split[1]), 0 if self.dataset_val == None else tf.data.experimental.cardinality(self.dataset_val).numpy()))
-            print('Test samples:\t{}, batches:\t{}'.format(0 if bases_data_split[2] == None else len(bases_data_split[2]), 0 if self.dataset_test == None else tf.data.experimental.cardinality(self.dataset_test).numpy()))
-
-    def train_val_test_split(self, raw_data, event_data, bases_data, train_size=0.8, val_size=0.1, test_size=0.1):
-        raw_train, raw_val, raw_test = utils.train_val_test_split(raw_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
-        event_train, event_val, event_test = utils.train_val_test_split(event_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
-        bases_train, bases_val, bases_test = utils.train_val_test_split(bases_data, val_size=val_size, train_size=train_size, test_size=test_size, random_state=self.random_seed, shuffle=True)
-        return (raw_train, raw_val, raw_test), (event_train, event_val, event_test), (bases_train, bases_val, bases_test)
-
-    def pad_input_data(self, raw_data, event_data):
-        raw_padded = pad_sequences(raw_data, maxlen=self.max_raw_length, dtype='float32', padding='post', truncating='post', value=self.initial_input_padding_value)
-        event_padded = pad_sequences(event_data, maxlen=self.max_event_length, dtype='float32', padding='post', truncating='post', value=self.initial_input_padding_value)
-        return raw_padded, event_padded
-
-    def fit_scalers(self, raw_train, event_train, partial=False):
-        if partial:
-            self.scalers['raw'].partial_fit((raw_train[raw_train != self.initial_input_padding_value]).reshape(-1, 1))
-            for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
-                vals = event_train[:,:,id]
-                self.scalers['event'][feat].partial_fit((vals[vals != self.initial_input_padding_value]).reshape(-1, 1))
-        else:
-            self.scalers['raw'].fit((raw_train[raw_train != self.initial_input_padding_value]).reshape(-1, 1))
-            for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
-                vals = event_train[:,:,id]
-                self.scalers['event'][feat].fit((vals[vals != self.initial_input_padding_value]).reshape(-1, 1))
-
-    def calculate_input_padding_value(self):
-        self.input_padding_value = float(round(self.scalers['raw'].transform(np.array([[self.padding_value_unscaled]]))[0][0] - 1))
-
-    def scale_input_data(self, raw_data_split, event_data_split):
-        raw_scaled = []
-        for raw_it in raw_data_split:
-            if raw_it is None:
-                raw_scaled.append(None)
-                continue
-            raw = np.copy(raw_it)
-            raw_no_pad = raw[raw != self.initial_input_padding_value]
-            raw_no_pad_scaled = self.scalers['raw'].transform(raw_no_pad.reshape(-1, 1))
-            raw[raw != self.initial_input_padding_value] = raw_no_pad_scaled.flatten()
-            raw_scaled.append(raw)
-
-        event_scaled = []
-        for event_it in event_data_split:
-            if event_it is None:
-                event_scaled.append(None)
-                continue
-            event = np.copy(event_it)
-            for id, feat in enumerate(['mean', 'std', 'length', 'd_mean', 'sq_mean']):
-                feat_vals = event[:,:,id]
-                feat_vals_no_pad = feat_vals[feat_vals != self.initial_input_padding_value]
-                feat_vals_no_pad_scaled = self.scalers['event'][feat].transform(feat_vals_no_pad.reshape(-1, 1))
-                feat_vals[feat_vals != self.initial_input_padding_value] = feat_vals_no_pad_scaled.flatten()
-                event[:,:,id] = feat_vals
-            event_scaled.append(event)
-        return tuple(raw_scaled), tuple(event_scaled)
-
-    def replace_input_padding_value(self, raw_data_split, event_data_split):
-        raw_replaced = []
-        for raw_it in raw_data_split:
-            if raw_it is None:
-                raw_replaced.append(None)
-                continue
-            raw = np.copy(raw_it)
-            raw[raw == self.initial_input_padding_value] = self.input_padding_value
-            raw_replaced.append(raw)
-
-        event_replaced = []
-        for event_it in event_data_split:
-            if event_it is None:
-                event_replaced.append(None)
-                continue
-            event = np.copy(event_it)
-            event[event == self.initial_input_padding_value] = self.input_padding_value
-            event_replaced.append(event)
-        return tuple(raw_replaced), tuple(event_replaced)
-
-    def prepare_bases_data(self, bases_data_split):
-        bases_prep = []
-        for bases in bases_data_split:
-            if bases is None:
-                bases_prep.append(None)
-                continue
-            bases_prep.append([' '.join(bases_sample) for bases_sample in bases])
-        return tuple(bases_prep)
-
-    def get_bases_subsequence_ground_true_aligned(self, start_raw_id, end_raw_id, bases_sequence, alignment_gt):
-        """alignment_gt of type & shape returned from _get_alignment_data()
+    def on_epoch_end(self):
+        """Updates indexes after each epoch
         """
-        bases_ids = alignment_gt[1, start_raw_id:end_raw_id]
-        return bases_sequence[min(bases_ids)-1:max(bases_ids)] # -1 due to 1 starting indices in alignment
-
-    def samples_generator(self, raw_aligned_data, events_sequence, bases_sequence, max_raw_length, bases_offset, alignment_gt_data, event_detection):
-        for i in range(0, len(bases_sequence) - bases_offset + 1, bases_offset):
-            j = i
-            raw_length_sum = len(raw_aligned_data[j])
-
-            while raw_length_sum < max_raw_length and j < len(raw_aligned_data) - 1:
-                j += 1
-                raw_length_sum += len(raw_aligned_data[j])
-
-            if raw_length_sum > max_raw_length:
-                j -= 1
-            elif j == len(raw_aligned_data) - 1 and raw_length_sum != max_raw_length:
-                break
-
-            # flatten raw vals
-            raw_subsequence = [val for raw_single_base in raw_aligned_data[i:j+1] for val in raw_single_base]
-            events_subsequence = events_sequence[i:j+1]
-
-            if event_detection:
-                start_raw_id = sum([len(x) for x in raw_aligned_data[0:i]])
-                end_raw_id = start_raw_id + len(raw_subsequence)
-                bases_subsequence = self.get_bases_subsequence_ground_true_aligned(
-                    start_raw_id, end_raw_id, bases_sequence, alignment_gt_data
-                )
-            else:
-                bases_subsequence = bases_sequence[i:j+1]
-
-            yield raw_subsequence, events_subsequence, bases_subsequence
+        if self.shuffle:
+            self.random_seed += 1
+            self.rng = np.random.default_rng(self.random_seed)
+            self.fetch_ids = self._compute_new_fetch_ids()
 
 
-    def _get_fast5_raw_data(self, fast5_path: str) -> np.ndarray:
-        """Get raw data read from fast5 file (first, in case of multiple)"""
-        raw_data = None
-
-        with get_fast5_file(fast5_path, mode="r") as f:
-            for read in f.get_reads():
-                raw_data = read.get_raw_data()
-                break
-
-        return raw_data
-
-
-    def _get_fasta_seq(self, fasta_path: str) -> np.ndarray:
-        """
-        Get first bases_num bases of fasta sequence
-        if bases_num == -1 return whole sequence
-        """
-        sequence = np.array([], dtype="<U1")
-
-        with open(fasta_path, "r") as f:
-            for i, line in enumerate(f):
-                if i == 1:
-                    sequence = np.array(list(line.rstrip()))
-                    break
-
-        return sequence
-
-
-    def _get_alignment_data(self, ali_path: str) -> np.ndarray:
-        """
-        Get simulator output alignment and return as a (2, len(raw_data)) array
-        Matching raw data ([0] row) with sequence bases by id ([1] row)
-        """
-        data = np.loadtxt(ali_path, delimiter=" ", dtype=int)
-        return data.T
-
-    def _get_event_detection_alignment_data(self, ed_ali_path: str) -> np.ndarray:
-        ranges_ids = (np.loadtxt(ed_ali_path)[:, 2:4]).astype(int)
-        return self._get_alignment_data_from_ranges_ids(ranges_ids)
-
-    def _get_bases_raw_aligned_data(self, alignment_data, raw_data):
-        """Get list of lists of base's raw values for each base/nucleotide"""
-        bases_raw_aligned_data = []
-        base_vals = []
-        base_id = 1
-        for (measurement, val) in zip(alignment_data.T, raw_data):
-            if measurement[1] != base_id:
-                bases_raw_aligned_data.append(base_vals)
-                base_id = measurement[1]
-                base_vals = []
-            base_vals.append(val)
-        bases_raw_aligned_data.append(base_vals)
-        return bases_raw_aligned_data
-
-    def _get_events_sequence(self, bases_raw_aligned_data):
-        events_sequence = []
-        prev_mean = 0
-
-        for base_raw_data in bases_raw_aligned_data:
-            mean = np.mean(base_raw_data)
-            std = np.std(base_raw_data)
-            length = len(base_raw_data)
-            d_mean = mean - prev_mean
-            prev_mean = mean
-            sq_mean = mean ** 2
-            events_sequence.append((mean, std, length, d_mean, sq_mean))
-
-        return np.array(events_sequence)
-
-    def _load_simulator_data(self, dir, event_detection=False):
-        dir = Path(dir)
-        fasta_path = dir / "sampled_read.fasta"
-        fast5_path = next((dir / "fast5").iterdir())
-        align_path = next((dir / "align").iterdir())
-
-        bases_sequence = self._get_fasta_seq(fasta_path)
-        raw_signal_data = self._get_fast5_raw_data(fast5_path)
-        alignment_data = self._get_alignment_data(align_path)
-
-        if event_detection:
-            event_detection_path = dir / 'event_detection.txt'
-            alignment_event_detection_data = self._get_event_detection_alignment_data(event_detection_path)
-            bases_raw_aligned_data = self._get_bases_raw_aligned_data(alignment_event_detection_data, raw_signal_data)
-        else:
-            bases_raw_aligned_data = self._get_bases_raw_aligned_data(alignment_data, raw_signal_data)
-
-        events_sequence = self._get_events_sequence(bases_raw_aligned_data)
-
-        return bases_raw_aligned_data, events_sequence, bases_sequence, alignment_data
-
-    def save_scalers(self, path: str):
-        """Save scalers as pickle to file in path
-        """
-        with open(path, 'wb') as scalers_file:
-            pickle.dump(self.scalers, scalers_file)
-
-    def load_scalers(self, path: str):
-        """Load scalers from file pickle in path
-        """
-        with open(path, 'rb') as scalers_file:
-            self.scalers = pickle.load(scalers_file)
-
-    ### chiron load source processing
-
-    def _load_all_chiron_data_samples_from_dir(self, dir, substring_match=None, max_files=None):
-        dir = Path(dir)
-        signals_paths = [p for p in dir.iterdir() if p.suffix == '.signal']
-        signals_paths.sort()
-        labels_paths = [p for p in dir.iterdir() if p.suffix == '.label']
-        labels_paths.sort()
-
-        if substring_match is not None:
-            signals_paths = [p for p in signals_paths if substring_match in p.stem]
-            labels_paths = [p for p in labels_paths if substring_match in p.stem]
-
-        if max_files is not None:
-            signals_paths = signals_paths[0:max_files]
-            labels_paths = labels_paths[0:max_files]
-
-        raw_samples_all, event_samples_all, bases_samples_all = [], [], []
-
-        if self.event_detection:
-            event_detection_paths = [p for p in dir.iterdir() if p.suffix == '.eventdetection']
-            event_detection_paths.sort()
-
-            for signal_path, label_path, ed_path in zip(signals_paths, labels_paths, event_detection_paths):
-                bases_raw_aligned_data, events_sequence, bases_sequence, alignment_data = self._load_chiron_single_data(signal_path, label_path, ed_path)
-                raw_samples, event_samples, bases_samples = zip(*self.samples_generator(bases_raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset, alignment_data, self.event_detection))
-                raw_samples_all.extend(raw_samples)
-                event_samples_all.extend(event_samples)
-                bases_samples_all.extend(bases_samples)
-
-        else:
-            for signal_path, label_path in zip(signals_paths, labels_paths):
-                bases_raw_aligned_data, events_sequence, bases_sequence, _ = self._load_chiron_single_data(signal_path, label_path)
-                raw_samples, event_samples, bases_samples = zip(*self.samples_generator(bases_raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
-                raw_samples_all.extend(raw_samples)
-                event_samples_all.extend(event_samples)
-                bases_samples_all.extend(bases_samples)
-
-        return raw_samples_all, event_samples_all, bases_samples_all
-
-    def _get_alignment_data_from_ranges_ids(self, ranges_ids):
-        raw_ids, bases_ids = [], []
-        i = 1
-        for base_range in ranges_ids:
-            bases_ids.extend([i] * base_range[0])
-            i += 1
-        raw_ids = [x for x in range(len(bases_ids))]
-        return np.array([raw_ids, bases_ids])
-
-    def _get_alignment_data_from_chiron_ranges_ids(self, ranges_ids):
-        raw_ids, bases_ids = [], []
-        i = 1
-        for base_range in ranges_ids:
-            bases_ids.extend([i] * (base_range[1] - base_range[0]))
-            i += 1
-        raw_ids = [x for x in range(len(bases_ids))]
-        return np.array([raw_ids, bases_ids])
-
-    def _load_chiron_single_data(self, signal_path, label_path, ed_path=None):
-        signal = np.loadtxt(signal_path)
-        labels = np.loadtxt(label_path, dtype='object')
-        ranges_ids = labels[:,0:2].astype('int')
-        bases_sequence = labels[:,2]
-
-        signal = signal[ranges_ids[0][0]:ranges_ids[-1][1]]
-        ranges_ids -= ranges_ids[0][0] - 1
-
-        alignment_data = self._get_alignment_data_from_chiron_ranges_ids(ranges_ids)
-
-        bases_raw_aligned_data = []
-
-        if self.event_detection:
-            alignment_event_detection_data = self._get_event_detection_alignment_data(ed_path)
-            bases_raw_aligned_data = self._get_bases_raw_aligned_data(alignment_event_detection_data, signal)
-
-        else:
-            bases_raw_aligned_data = self._get_bases_raw_aligned_data(alignment_data, signal)
-
-        events_sequence = self._get_events_sequence(bases_raw_aligned_data)
-
-        return bases_raw_aligned_data, events_sequence, bases_sequence, alignment_data
-
-
-    def save_chiron_padded_samples(self, dir, scalers_partial_fit=False):
-        dir = Path(dir)
-        samples_dir = dir / f'samples.rawmax{self.max_raw_length}.evmax{self.max_event_length}.offset{self.bases_offset}'
-        samples_dir.mkdir(parents=True, exist_ok=True)
-
-        signals_paths = [p for p in dir.iterdir() if p.suffix == '.signal']
-        signals_paths.sort()
-        labels_paths = [p for p in dir.iterdir() if p.suffix == '.label']
-        labels_paths.sort()
-
-        random_state = self.random_seed
-        max_lens = []
-
-        for signal_path, label_path in zip(signals_paths, labels_paths):
-            bases_raw_aligned_data, events_sequence, bases_sequence = self._load_chiron_single_data(signal_path, label_path)
-            raw_samples, event_samples, bases_samples = zip(*self.samples_generator(bases_raw_aligned_data, events_sequence, bases_sequence, self.max_raw_length, self.bases_offset))
-
-            if self.verbose:
-                max_len = max(map(len, bases_samples))
-                max_lens.append(max_len)
-                print('{}: max bases seq. length: {}'.format(signal_path.stem, max_len))
-                if max_len > self.max_event_length:
-                    raise Exception('Max event length smaller than max length.')
-
-            raw_samples, event_samples = self.pad_input_data(raw_samples, event_samples)
-            raw_samples = np.reshape(raw_samples, (len(raw_samples), self.max_raw_length, 1))
-            raw_samples, event_samples, bases_samples = sklearn_shuffle(raw_samples, event_samples, bases_samples, random_state=random_state)
-
-            if scalers_partial_fit:
-                self.fit_scalers(raw_samples, event_samples, partial=True)
-
-            random_state += 1
-
-            with open(samples_dir / f'{signal_path.stem}.pkl', 'wb') as f:
-                pickle.dump((raw_samples, event_samples, bases_samples), f, protocol=pickle.HIGHEST_PROTOCOL)
-
-        if self.verbose:
-            print('Max len: {}'.format(max(max_lens)))
-
-    def transform_and_replace_chiron_saved_samples(self, samples_dir):
-        samples_dir = Path(samples_dir)
-        pkl_paths = [p for p in dir.iterdir() if p.suffix == '.pkl']
-        pkl_paths.sort()
-
-        for pkl_path in pkl_paths:
-            with open(pkl_path, 'w+b') as f:
-                if self.verbose:
-                    print('Replacing {}'.format(pkl_path))
-                (raw_samples, event_samples, bases_samples) = pickle.load(f)
-                raw_data, event_data =  self.scale_input_data((raw_samples), (event_samples))
-                bases_data = self.prepare_bases_data((bases_samples))
-                pickle.dump((raw_data[0], event_data[0], bases_data[0]), f, protocol=pickle.HIGHEST_PROTOCOL)
-
-
-def text_lower_and_start_end(text):
-    text = tf.strings.lower(text)
-    text = tf.strings.join(['[START]', text, '[END]'], separator=' ')
-    return text
+if __name__ == '__main__':
+    split_eval_files_info_into_test_validation(0.25, 'data/chiron/lambda/eval/all/files_info.eval.snippets.stride_6.json')

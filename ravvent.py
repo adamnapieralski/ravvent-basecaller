@@ -1,155 +1,85 @@
 import tensorflow as tf
 from timeit import default_timer as timer
-import json
 
-from data_loader import DataModule
+import data_loader as dl
 from basecaller import Basecaller
-import utils
-
-DATA_TYPE = 'raw'
-
-BATCH_SIZE = 128
-
-RAW_MAX_LEN = 100
-EVENT_MAX_LEN = 30
-
-TRAIN_SIZE = 0.8
-VAL_SIZE = 0.1
-TEST_SIZE = 0.1
-
-UNITS = 128
-EPOCHS = 25
-PATIENCE = 10
-DATA_PATH = 'data/chiron/train'
-BASES_OFFSET = 1
-TEACHER_FORCING = False
-RNN_TYPE = 'gru'
-LOAD_SOURCE = 'simulator'
-ATTENTION_TYPE = 'bahdanau' # 'luong'
-EMBEDDING_DIM = 5
-
-ADDITIONAL_INFO = None
 
 RANDOM_SEED = 22
 
-if DATA_TYPE == 'joint':
-    NAME_MAX_LEN = f'rawmax{RAW_MAX_LEN}.evmax{EVENT_MAX_LEN}'
-else:
-    NAME_MAX_LEN = f'rawmax{RAW_MAX_LEN}' if DATA_TYPE == 'raw' else f'evmax{EVENT_MAX_LEN}'
+def run():
+    tf.random.set_seed(RANDOM_SEED)
 
-NAME_SPEC = f'{DATA_TYPE}.{RNN_TYPE}.u{UNITS}.{LOAD_SOURCE}.{NAME_MAX_LEN}.b{BATCH_SIZE}.ep{EPOCHS}.pat{PATIENCE}.tf{int(TEACHER_FORCING)}.emb{EMBEDDING_DIM}.{ATTENTION_TYPE}'
+    teacher_forcing = 0.5
+    learning_rate = 0.0001
+    encoder_depth = 2
+    encoder_units = 128
+    decoder_depth = 1
+    decoder_units = 128
 
-if ADDITIONAL_INFO is not None:
-    NAME_SPEC += f'.{ADDITIONAL_INFO}'
+    data_type = 'joint'
+    batch_size = 128
+    epochs = 20
+    stride = 6
+    rnn_type = 'bilstm'
+    attention_type = 'luong'
 
+    steps_per_epoch = 10000
+    validation_steps = 1500
 
-tf.random.set_seed(RANDOM_SEED)
+    name = f'{data_type}.lambda.no_mask.pad.lr{round(learning_rate, 6)}.{rnn_type}.encu{encoder_units}.encd{encoder_depth}.decu{decoder_units}.decd{decoder_depth}.b{batch_size}.{attention_type}.tf{int(teacher_forcing) if type(teacher_forcing) is bool else round(teacher_forcing, 2)}.strd{stride}.spe{steps_per_epoch}.spv{validation_steps}'
 
-if __name__ == '__main__':
-    print(NAME_SPEC)
-    # chiron 100
-    dm = DataModule(
-        dir='data/chiron/train/ecoli_0001_0100',
-        max_raw_length=RAW_MAX_LEN,
-        max_event_length=EVENT_MAX_LEN,
-        bases_offset=BASES_OFFSET,
-        batch_size=BATCH_SIZE,
-        train_size=1,
-        val_size=0,
-        test_size=0,
-        load_source=LOAD_SOURCE,
-        random_seed=RANDOM_SEED,
-        verbose=True
-    )
-    dm.setup()
-    train_ds = dm.dataset_train
+    print('RUNNING', name)
 
-    dm.dir = 'data/chiron/eval/ecoli_eval_0001_0100'
-    dm.train_size, dm.val_size, dm.test_size = 0, 0.25, 0.75
-    dm.setup()
-    val_ds, test_ds = dm.dataset_val, dm.dataset_test
-
-    # # simulator
-    # dm = DataModule(
-    #     dir=DATA_PATH,
-    #     max_raw_length=RAW_MAX_LEN,
-    #     max_event_length=EVENT_MAX_LEN,
-    #     bases_offset=BASES_OFFSET,
-    #     batch_size=BATCH_SIZE,
-    #     load_source=LOAD_SOURCE,
-    #     random_seed=RANDOM_SEED,
-    #     verbose=True
-    # )
-    # dm.setup()
-    # train_ds, val_ds, test_ds = dm.dataset_train, dm.dataset_val, dm.dataset_test
+    dg_train = dl.RawEventNucDataGenerator('data/chiron/lambda/train/all/files_info.snippets.stride_6.json', stride, shuffle=True, initial_random_seed=30)
+    dg_val = dl.RawEventNucDataGenerator('data/chiron/lambda/eval/all/files_info.val.snippets.stride_6.json', stride, shuffle=True, initial_random_seed=30)
 
     basecaller = Basecaller(
-        units=UNITS,
-        output_text_processor=dm.output_text_processor,
-        input_data_type=DATA_TYPE,
-        input_padding_value=dm.input_padding_value,
-        embedding_dim=EMBEDDING_DIM,
-        rnn_type=RNN_TYPE,
-        teacher_forcing=TEACHER_FORCING,
-        attention_type=ATTENTION_TYPE
+        enc_units=encoder_units,
+        dec_units=decoder_units,
+        batch_sz=batch_size,
+        tokenizer=dl.nuc_tk,
+        input_data_type=data_type,
+        input_padding_value=dl.INPUT_PADDING,
+        encoder_depth=encoder_depth,
+        decoder_depth=decoder_depth,
+        rnn_type=rnn_type,
+        attention_type=attention_type,
+        teacher_forcing=teacher_forcing
     )
 
     # Configure the loss and optimizer
     basecaller.compile(
-        optimizer=tf.optimizers.Adam(),
-        loss=utils.MaskedLoss(basecaller.output_padding_token),
+        optimizer=tf.optimizers.Adam(learning_rate=learning_rate, clipnorm=1.),
     )
-    batch_loss = utils.BatchLogs('batch_loss')
 
-    # Callbacks
-    checkpoint_filepath = f'models/model.{NAME_SPEC}/model_chp'
+    load_checkpoint = 'models/snippets/model.1.joint.lambda.no_mask.pad.lr0.0001.bilstm.encu128.encd2.decu128.decd1.b128.luong.tf0.5.strd6.spe10000.spv1500.30/model_chp'
+    print(f'Loading weights: {load_checkpoint}')
+    basecaller.load_weights(load_checkpoint)
+
+    checkpoint_filepath = f'models/snippets/model.2.{name}.{"{epoch:02d}"}/model_chp'
+    print('New checkpoints:', checkpoint_filepath)
+
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_filepath,
         save_weights_only=True,
-        monitor='val_batch_loss',
+        monitor='val_loss',
         mode='min',
-        save_best_only=True
+        save_best_only=False
     )
-    early_stopping_callback = tf.keras.callbacks.EarlyStopping(
-        monitor='val_batch_loss',
-        patience=PATIENCE,
-        restore_best_weights=True,
-        mode='min',
-        verbose=1
-    )
+
     csv_logger = tf.keras.callbacks.CSVLogger(
-        f'info/csvlog.{NAME_SPEC}.log',
+        f'info/snippets/csvlog.2.{name}.log', append=False
     )
-    nan_terminate = tf.keras.callbacks.TerminateOnNaN()
 
-    start = timer()
     hist = basecaller.fit(
-        train_ds,
-        epochs=EPOCHS,
-        callbacks=[batch_loss, model_checkpoint_callback, early_stopping_callback, csv_logger, nan_terminate],
-        validation_data=val_ds
+        dg_train,
+        epochs=epochs,
+        callbacks=[model_checkpoint_callback, csv_logger],
+        validation_data=dg_val,
+        steps_per_epoch=steps_per_epoch,
+        validation_steps=validation_steps,
+        shuffle=False
     )
-    mid_1 = timer()
 
-    # load best model by val_batch_loss
-    basecaller.load_weights(f'models/model.{NAME_SPEC}/model_chp')
-
-    print(hist.history)
-
-    info = {}
-    info['train_history'] = hist.history
-
-    mid_2 = timer()
-    test_accuracy = basecaller.evaluate_test(test_ds)
-    end = timer()
-    print('Test accuracy: {}'.format(test_accuracy))
-
-    info['test_accuracy'] = test_accuracy
-
-    info['train_time'] = mid_1 - start
-    info['test_time'] = end - mid_2
-
-    info['batch_loss'] = batch_loss.logs
-
-    with open(f'info/info.{NAME_SPEC}.json', 'w') as info_file:
-        json.dump(info, info_file, indent=2)
+if __name__ == '__main__':
+    run()
