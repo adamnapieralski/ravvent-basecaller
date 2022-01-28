@@ -3,8 +3,8 @@
 Basecaller, called Ravvent, using joint raw and event data sequence-to-sequence processing. Incorporating an encoder-decoder architecture with attention mechanism and LSTMs as RNNs.
 
 ## Structure
-- [data_loader.py](data_loader.py) - includes DataModule class responsible for loading simulated and real data, then preprocessing it into final batches, consumable by model
-- [basecaller.py](basecaller.py) - includes Encoder, Decoder, Attention classes, and general Basecaller class, combining all layers into single keras Model responsible for learning and performing basecalling task
+- [data_loader.py](data_loader.py) - includes DataGenerator class responsible for loading simulated and real data, then preprocessing it into final batches, consumable by model
+- [basecaller.py](basecaller.py) - includes Encoder, Decoder classes, and general Basecaller class, combining all layers into single keras Model responsible for learning and performing basecalling task
 - [utils.py](utils.py) - includes various utilities functions
 - [ravvent.py](ravvent.py), [run_simulator_reduced.py](run_simulator_reduced.py) - sample scripts for running learning and evaluating model pipeline
 
@@ -17,6 +17,6 @@ Real data source is supporting data for [Chiron](https://github.com/haotianteng/
 
 ## Environment
 ### Prerequisites
-- tensorflow >= 2.4
+- tensorflow >= 2.7
 - [ont_fast5_api](https://github.com/nanoporetech/ont_fast5_api)
 - numpy

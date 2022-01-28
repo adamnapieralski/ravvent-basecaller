@@ -120,6 +120,12 @@ def generate_event_detection_for_chiron(chiron_dir, boilerplate_fast5_file, dete
         run_event_detection(detect_events_path, signal_fast5_path, event_detection_path)
         os.remove(signal_fast5_path)
 
+def calc_prob_logits_beam_search_scores(beam_scores):
+    if len(tf.shape(beam_scores)) == 3:
+        min_tensor = tf.pad(beam_scores[:,:,:-1], [[0,0], [0,0], [1,0]])
+    else:
+        min_tensor = tf.pad(beam_scores[:,:-1], [[0,0], [1,0]])
+    return tf.math.exp(beam_scores - min_tensor)
 
 class BatchLogs(tf.keras.callbacks.Callback):
     def __init__(self, key):
