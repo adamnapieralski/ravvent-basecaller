@@ -18,7 +18,7 @@ def run():
 
     data_type = 'joint'
     batch_size = 128
-    epochs = 20
+    epochs = 40
     stride = 6
     rnn_type = 'bilstm'
     attention_type = 'luong'
@@ -26,12 +26,12 @@ def run():
     steps_per_epoch = 10000
     validation_steps = 1500
 
-    name = f'{data_type}.lambda.no_mask.pad.lr{round(learning_rate, 6)}.{rnn_type}.encu{encoder_units}.encd{encoder_depth}.decu{decoder_units}.decd{decoder_depth}.b{batch_size}.{attention_type}.tf{int(teacher_forcing) if type(teacher_forcing) is bool else round(teacher_forcing, 2)}.strd{stride}.spe{steps_per_epoch}.spv{validation_steps}'
+    name = f'{data_type}.lambda.mask.pad.lr{round(learning_rate, 6)}.{rnn_type}.encu{encoder_units}.encd{encoder_depth}.decu{decoder_units}.decd{decoder_depth}.b{batch_size}.{attention_type}.tf{int(teacher_forcing) if type(teacher_forcing) is bool else round(teacher_forcing, 2)}.strd{stride}.spe{steps_per_epoch}.spv{validation_steps}'
 
     print('RUNNING', name)
 
-    dg_train = dl.RawEventNucDataGenerator('data/chiron/lambda/train/all/files_info.snippets.stride_6.json', stride, shuffle=True, initial_random_seed=30)
-    dg_val = dl.RawEventNucDataGenerator('data/chiron/lambda/eval/all/files_info.val.snippets.stride_6.json', stride, shuffle=True, initial_random_seed=30)
+    dg_train = dl.RawEventNucDataGenerator('data/chiron/lambda/train/all/files_info.snippets.stride_6.json', stride, shuffle=True, initial_random_seed=0)
+    dg_val = dl.RawEventNucDataGenerator('data/chiron/lambda/eval/all/files_info.val.snippets.stride_6.json', stride, shuffle=True, initial_random_seed=0)
 
     basecaller = Basecaller(
         enc_units=encoder_units,
@@ -52,11 +52,11 @@ def run():
         optimizer=tf.optimizers.Adam(learning_rate=learning_rate, clipnorm=1.),
     )
 
-    load_checkpoint = 'models/snippets/model.1.joint.lambda.no_mask.pad.lr0.0001.bilstm.encu128.encd2.decu128.decd1.b128.luong.tf0.5.strd6.spe10000.spv1500.30/model_chp'
-    print(f'Loading weights: {load_checkpoint}')
-    basecaller.load_weights(load_checkpoint)
+    # load_checkpoint = 'models/snippets/model.1.joint.lambda.no_mask.pad.lr0.0001.bilstm.encu128.encd2.decu128.decd1.b128.luong.tf0.5.strd6.spe10000.spv1500.30/model_chp'
+    # print(f'Loading weights: {load_checkpoint}')
+    # basecaller.load_weights(load_checkpoint)
 
-    checkpoint_filepath = f'models/snippets/model.2.{name}.{"{epoch:02d}"}/model_chp'
+    checkpoint_filepath = f'models/snippets/mask/model.1.{name}.{"{epoch:02d}"}/model_chp'
     print('New checkpoints:', checkpoint_filepath)
 
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
@@ -68,7 +68,7 @@ def run():
     )
 
     csv_logger = tf.keras.callbacks.CSVLogger(
-        f'info/snippets/csvlog.2.{name}.log', append=False
+        f'info/snippets/csvlog.1.{name}.log', append=False
     )
 
     hist = basecaller.fit(

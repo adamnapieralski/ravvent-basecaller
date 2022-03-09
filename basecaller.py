@@ -24,12 +24,15 @@ class Encoder(tf.keras.Model):
         ) for _ in range(self.layer_depth)
     ]
 
-  def call(self, inputs, training=False):
+  def call(self, inputs, training=False, mask=None):
     inputs.set_shape((None, None, self.inputs_features_num))
     output = inputs
     states = None
     for i in range(self.layer_depth):
-        result = self.bidir_layers[i](output, initial_state=states, training=training)
+        kwargs = {'initial_state': states, 'training': training}
+        if mask is not None:
+            kwargs['mask'] = mask
+        result = self.bidir_layers[i](output, **kwargs)
         output, states = result[0], result[1:]
 
     return output, states
@@ -196,14 +199,14 @@ class Basecaller(tf.keras.Model):
         max_output_len = tf.shape(target_tokens)[1]
 
         with tf.GradientTape() as tape:
-            enc_output = self._encode_input(input_data, training=True)
+            enc_output, input_mask = self._encode_input(input_data, training=True)
 
             loss = tf.constant(0.0)
 
             dec_input = target_tokens[:, :-1]
             real = target_tokens[:, 1:]
 
-            self.decoder.attention_mechanism.setup_memory(enc_output)
+            self.decoder.attention_mechanism.setup_memory(enc_output, memory_mask=input_mask)
 
             decoder_initial_state = self.decoder.build_initial_state(self.batch_sz, None, tf.float32)
 
@@ -263,13 +266,13 @@ class Basecaller(tf.keras.Model):
         return result_text
 
     def beam_search_prediction(self, input_data, beam_width, max_output_len):
-        enc_output = self._encode_input(input_data, training=False)
+        enc_output, input_mask = self._encode_input(input_data, training=False)
         batch_size = tf.shape(enc_output)[0]
         start_tokens = tf.fill([batch_size], self.output_start_token)
         enc_output = tfa.seq2seq.tile_batch(enc_output, multiplier=beam_width)
-        # input_mask = tfa.seq2seq.tile_batch(input_mask, multiplier=beam_width)
+        input_mask = tfa.seq2seq.tile_batch(input_mask, multiplier=beam_width)
 
-        self.decoder.attention_mechanism.setup_memory(enc_output)
+        self.decoder.attention_mechanism.setup_memory(enc_output, memory_mask=input_mask)
 
         decoder_initial_state = self.decoder.rnn_cell.get_initial_state(batch_size=beam_width*batch_size, dtype=tf.float32)
         decoder_instance = tfa.seq2seq.BeamSearchDecoder(
@@ -284,7 +287,7 @@ class Basecaller(tf.keras.Model):
         return outputs.predicted_ids[:,:,0], outputs.beam_search_decoder_output.scores[:,:,0]
 
     def greedy_search_prediction(self, input_data, max_output_len):
-        enc_output = self._encode_input(input_data, training=False)
+        enc_output, input_mask = self._encode_input(input_data, training=False)
         batch_size = tf.shape(enc_output)[0]
         start_tokens = tf.fill([batch_size], self.output_start_token)
 
@@ -292,7 +295,7 @@ class Basecaller(tf.keras.Model):
 
         decoder_instance = tfa.seq2seq.BasicDecoder(cell=self.decoder.rnn_cell, sampler=greedy_sampler, output_layer=self.decoder.fc, maximum_iterations=max_output_len - 1)
 
-        self.decoder.attention_mechanism.setup_memory(enc_output)
+        self.decoder.attention_mechanism.setup_memory(enc_output, memory_mask=input_mask)
         decoder_initial_state = self.decoder.build_initial_state(batch_size, None, tf.float32)
 
         outputs, _, _ = decoder_instance(None, start_tokens = start_tokens, end_token=self.output_end_token, initial_state=decoder_initial_state, training=False)
@@ -365,21 +368,21 @@ class Basecaller(tf.keras.Model):
         if self.input_data_type == 'joint':
             (raw_input, event_input) = input_data
 
-            # raw_mask = self._prepare_input_mask(raw_input, 'raw')
+            raw_mask = self._prepare_input_mask(raw_input, 'raw')
             enc_output_raw, _ = self.encoder_raw(raw_input, training=training)
 
-            # event_mask = self._prepare_input_mask(event_input, 'event')
+            event_mask = self._prepare_input_mask(event_input, 'event')
             enc_output_event, _ = self.encoder_event(event_input, training=training)
 
             enc_output = tf.concat((enc_output_raw, enc_output_event), axis=1)
-            # input_mask = tf.concat((raw_mask, event_mask), axis=-1)
+            input_mask = tf.concat((raw_mask, event_mask), axis=-1)
 
         elif self.input_data_type == 'raw':
-            # input_mask = self._prepare_input_mask(input_data, self.input_data_type)
+            input_mask = self._prepare_input_mask(input_data, self.input_data_type)
             enc_output, _ = self.encoder_raw(input_data, training=training)
 
         elif self.input_data_type == 'event':
-            # input_mask = self._prepare_input_mask(input_data, self.input_data_type)
+            input_mask = self._prepare_input_mask(input_data, self.input_data_type)
             enc_output, _ = self.encoder_event(input_data, training=training)
 
-        return enc_output
+        return enc_output, input_mask
