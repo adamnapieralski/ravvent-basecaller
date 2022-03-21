@@ -6,6 +6,7 @@ from pathlib import Path
 # import tensorflow as tf
 # import analysis_utils as au
 import pickle
+import event_detection.event_detector as ed
 # from data_loader import DataModule
 # from basecaller import Basecaller
 # import utils
@@ -223,9 +224,66 @@ def plot_event_detection_window_search():
 
     plt.savefig('event_detection_window_search.png', dpi=600)
 
+
+def plot_event_detection():
+    short_win_len = 6
+    long_win_len = 16
+    detector = ed.EventDetector(window_length1=short_win_len, window_length2=long_win_len)
+    detector.reset()
+
+    raw = np.loadtxt('data/chiron/ecoli_0001_0080/ecoli_0001.signal')
+    raw = raw[20200:20500]
+
+    tstat1 = detector.compute_tstat_all(raw, detector.short_detector['window_length'])
+    tstat2 = detector.compute_tstat_all(raw, detector.long_detector['window_length'])
+
+    detector.short_detector['tstat'] = tstat1
+    detector.long_detector['tstat'] = tstat2
+
+    peaks = detector.detect_peak_all()
+
+    raw = raw[long_win_len+1:-long_win_len-1]
+    tstat1 = tstat1[long_win_len+1:-long_win_len-1]
+    tstat2 = tstat2[long_win_len+1:-long_win_len-1]
+    peaks -= long_win_len + 1
+    peaks = peaks[peaks > 0]
+    peaks = peaks[peaks < len(raw)]
+
+    fig, (ax1, ax2, ax3) = plt.subplots(3)
+    plt.subplots_adjust(hspace=0.5)
+    fig.set_size_inches((15, 10))
+    ax1.plot(raw)
+    ax1.set_title('(a) Raw data')
+    ax1.set_xlabel('Raw data id')
+    ax1.set_ylabel('Value')
+
+
+    ax2.plot(tstat1)
+    ax2.set_title('(b) T-test$_1$ data')
+    ax2.set_xlabel('Raw data id')
+    ax2.set_ylabel('Value')
+
+
+    ax3.plot(tstat2)
+    ax3.set_title('(b) T-test$_2$ data')
+    ax3.set_xlabel('Raw data id')
+    ax3.set_ylabel('Value')
+
+
+    for div in peaks:
+        color = 'olive'
+        ax1.axvline(x=div, color=color)
+        ax2.axvline(x=div, color=color)
+        ax3.axvline(x=div, color=color)
+
+    fig.tight_layout()
+    plt.savefig('event_detection.png', dpi=600)
+
+
 if __name__ == '__main__':
     # plot_reduced_raw_event_joint_test_accuracies_vs_no_of_6_mers()
     # plot_num_basic_6_mers_vs_all_appearing_6_mers()
     # plot_rnns_comparison()
     # plot_attention_weights()
     plot_event_detection_window_search()
+    plot_event_detection()
