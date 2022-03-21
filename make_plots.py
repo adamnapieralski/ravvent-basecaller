@@ -170,6 +170,7 @@ def plot_event_detection_window_search():
     ref_error = (detected - ref_len) / ref_len
     ref_error_abs = abs(ref_error)
 
+    title_fontsize = 16
     axis_labels_fontsize = 16
     ticks_fontsize = 14
     annot_fontsize = 14
@@ -192,6 +193,7 @@ def plot_event_detection_window_search():
 
     ax1.set_ylabel('$w_{len1}$', fontsize=axis_labels_fontsize)
     ax1.set_xlabel('$w_{len2}$', fontsize=axis_labels_fontsize)
+    ax1.set_title('(a) whole analysed range', fontsize=title_fontsize)
 
     for i in range(ref_error_abs.shape[0]):
         for j in range(ref_error_abs.shape[1]):
@@ -212,6 +214,8 @@ def plot_event_detection_window_search():
 
     ax2.set_ylabel('$w_{len1}$', fontsize=axis_labels_fontsize)
     ax2.set_xlabel('$w_{len2}$', fontsize=axis_labels_fontsize)
+    ax2.set_title('(b) best fitting range', fontsize=title_fontsize)
+
 
     for i in range(ref_error_cut.shape[0]):
         for j in range(ref_error_cut.shape[1]):
