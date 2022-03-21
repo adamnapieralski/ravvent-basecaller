@@ -209,6 +209,75 @@ class EventDetector():
         self.evt_st_sumsq = self.sumsq[evt_en_buf]
         return True
 
+    def compute_tstat_all(self, raw, w_len):
+        sum = np.cumsum(raw)
+        sumsq = np.cumsum(raw*raw)
+
+        tstat = np.zeros_like(sum)
+
+        for i in range(w_len, len(sum) - w_len):
+            sum1 = sum[i]
+            sumsq1 = sumsq[i]
+            if i > w_len:
+                sum1 -= sum[i-w_len]
+                sumsq1 -= sumsq[i-w_len]
+            sum2 = sum[i+w_len] - sum[i]
+            sumsq2 = sumsq[i+w_len] - sumsq[i]
+            mean1 = sum1 / w_len
+            mean2 = sum2 / w_len
+            combined_var = sumsq1 / w_len - mean1 * mean1 + sumsq2 / w_len - mean2 * mean2
+            combined_var = max((combined_var, FLT_MIN))
+            delta_mean = mean2 - mean1
+            tstat[i] = abs(delta_mean) / ((combined_var / w_len) ** 0.5)
+        return tstat
+
+    def detect_peak_all(self):
+        detectors = [self.short_detector, self.long_detector]
+
+        peaks = np.zeros_like(self.short_detector['tstat'])
+        peak_count = 0
+        for i in range(len(peaks)):
+            for detector in detectors:
+                if detector['masked_to'] >= i:
+                    continue
+
+                current_value = detector['tstat'][i]
+
+                if detector['peak_pos'] == detector['DEF_PEAK_POS']:
+                    # Case 1: we've not yet recorder maximum
+                    if current_value < detector['peak_value']:
+                        # either record a deeper minimum
+                        detector['peak_value'] = current_value
+                    elif current_value - detector['peak_value'] > self.params['peak_height']:
+                        # or we've seen a qualifying maximum
+                        detector['peak_value'] = current_value
+                        detector['peak_pos'] = i
+                        # otherwise wait to rise high enough to be considered a peak
+                else:
+                    # Case 2: In an existing peak, waiting to see if it's good
+                    if current_value > detector['peak_value']:
+                        # Update the peak
+                        detector['peak_value'] = current_value
+                        detector['peak_pos'] = i
+                    # Dominate other tstat signals if we're going to fire at some point
+                    if detector == self.short_detector:
+                        if detector['peak_value'] > detector['threshold']:
+                            self.long_detector['masked_to'] = detector['peak_pos'] + detector['window_length']
+                            self.long_detector['peak_pos'] = self.long_detector['DEF_PEAK_POS']
+                            self.long_detector['peak_value'] = self.long_detector['DEF_PEAK_VAL']
+                            self.long_detector['valid_peak'] = False
+                    # if we convinced ourselves we've seen a peak
+                    if detector['peak_value'] - current_value > self.params['peak_height'] and detector['peak_value'] > detector['threshold']:
+                        detector['valid_peak'] = True
+                    # Finally, check the distance if this is a good peak
+                    if detector['valid_peak'] and (i - detector['peak_pos']) > detector['window_length'] / 2:
+                        peaks[peak_count] = detector['peak_pos']
+                        peak_count += 1
+                        detector['peak_pos'] = detector['DEF_PEAK_POS']
+                        detector['peak_value'] = current_value
+                        detector['valid_peak'] = False
+        return peaks[peaks > 0].astype(int)
+
 def to_u32(val):
     return int(val) & 0xffffffff
 
