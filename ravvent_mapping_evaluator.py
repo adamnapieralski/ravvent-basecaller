@@ -12,7 +12,9 @@ import merger
 import basecaller as bc
 import json
 
-BEAM_WIDTH = 1
+BEAM_WIDTH = 5
+ENCODER_DEPTH = 2
+DECODER_DEPTH = 1
 
 class MappingEvaluator():
 
@@ -114,8 +116,8 @@ class MappingEvaluator():
                 tokenizer=dl.nuc_tk,
                 input_data_type=data_type,
                 input_padding_value=dl.INPUT_PADDING,
-                encoder_depth=2,
-                decoder_depth=1,
+                encoder_depth=ENCODER_DEPTH,
+                decoder_depth=DECODER_DEPTH,
                 rnn_type='bilstm',
                 attention_type='luong',
                 teacher_forcing=0.5
@@ -165,18 +167,18 @@ class MappingEvaluator():
             #     res = json.load(f)
 
             self.setup_basecaller(
-                f'models/snippets/model.1.{data_type}.lambda.no_mask.pad.lr0.0001.bilstm.encu128.encd2.decu128.decd1.b128.luong.tf0.5.strd6.spe10000.spv1500.{ep}/model_chp',
+                f'models/snippets/mask/encd_{ENCODER_DEPTH}_decd_{DECODER_DEPTH}/model.1.{data_type}.lambda.mask.pad.lr0.0001.bilstm.encu128.encd{ENCODER_DEPTH}.decu128.decd{DECODER_DEPTH}.b128.luong.tf0.5.strd6.spe10000.spv1500.{ep}/model_chp',
                 data_type,
                 mode=1
             )
             if eval_type == 'val':
                 files_info_path = 'data/chiron/lambda/eval/all/files_info.val.snippets.stride_6.json'
-                eval_res_path = f'info/snippets/mapping_evaluations/mapping_evaluator_results.snippets.{data_type}.{ep}.json'
+                eval_res_path = f'info/snippets/mapping_evaluations/encd_{ENCODER_DEPTH}_decd_{DECODER_DEPTH}/mapping_evaluator_results.snippets.{data_type}.{ep}.json'
             elif eval_type == 'test':
                 # files_info_path = 'data/chiron/lambda/eval/all/files_info.test.snippets.stride_6.json'
                 # eval_res_path = f'info/snippets/mapping_evaluations/mapping_evaluator_results.snippets.test.{data_type}.{ep}.beam{BEAM_WIDTH}.json'
                 files_info_path = 'data/chiron/ecoli/eval/files_info.test.snippets.stride_6.json'
-                eval_res_path = f'info/snippets/mapping_evaluations/mapping_evaluator_results.snippets.test.{data_type}.{ep}.ecoli.beam{BEAM_WIDTH}.json'
+                eval_res_path = f'info/snippets/mapping_evaluations/encd_{ENCODER_DEPTH}_decd_{DECODER_DEPTH}/mapping_evaluator_results.snippets.test.{data_type}.{ep}.ecoli.beam{BEAM_WIDTH}.json'
 
             with open(files_info_path, 'rt') as f:
             # with open('data/chiron/ecoli/eval/files_info.val.snippets.stride_6.json', 'rt') as f:
@@ -198,5 +200,5 @@ class MappingEvaluator():
 if __name__ == '__main__':
     me = MappingEvaluator()
 
-    me.evaluate_specific('raw', 40, 40, 'test')
-    me.evaluate_specific('joint', 40, 40, 'test')
+    me.evaluate_specific('raw', 1, 40, 'val')
+    # me.evaluate_specific('joint', 40, 40, 'test')

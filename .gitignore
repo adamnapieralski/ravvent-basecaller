@@ -1,11 +1,14 @@
 data/*
 !data/.gitkeep
 !data/generate_simulator_reduced.py
+!data/generate_simulated_from_chiron.py
+!data/count_bases.sh
 !data/simulator-6-mers.json
 !data/simulator/
 data/simulator/random/
 data/simulator/reduced/*
 !data/simulator/reduced/*.fasta
+data/simulator/reduced_org
 
 models/*
 !models/.gitkeep
