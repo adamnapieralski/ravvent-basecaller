@@ -3,8 +3,9 @@ import matplotlib.pyplot as plt
 import json, re, sys
 from pathlib import Path
 
-import tensorflow as tf
-import analysis_utils as au
+# import tensorflow as tf
+# import analysis_utils as au
+import pickle
 # from data_loader import DataModule
 # from basecaller import Basecaller
 # import utils
@@ -146,8 +147,85 @@ def plot_attention_weights():
 
     # plt.tight_layout()
     # plt.savefig('results/attention/attention_weights_all_2.png', dpi=300, pad_inches=0)
+
+
+def plot_event_detection_window_search():
+    with open('data/chiron/lambda/train/ed_param_search.pkl', 'rb') as f:
+        data_lambda = pickle.load(f)
+
+    with open('data/chiron/ecoli/ed_param_search.pkl', 'rb') as f:
+        data_ecoli = pickle.load(f)
+
+    ref_len = 0
+    detected = np.zeros((7, 9))
+
+    for data in [data_lambda, data_ecoli]:
+        for read_meta in data:
+            ref_len += read_meta['ref_len']
+            for k, v in read_meta['ed'].items():
+                detected[k[0] - 3, (k[1] - 1) // 2 - 2] += v
+
+    (detected - ref_len) / ref_len
+    ref_error = (detected - ref_len) / ref_len
+    ref_error_abs = abs(ref_error)
+
+    axis_labels_fontsize = 16
+    ticks_fontsize = 14
+    annot_fontsize = 14
+    annot_fontsize_bold = 16
+
+
+    ref_error_abs = abs(ref_error)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    fig.set_size_inches((20, 7))
+    im = ax1.imshow(ref_error_abs, cmap='viridis_r', vmin=0, vmax=1)
+    cbar = ax1.figure.colorbar(im, ax=ax1)
+
+    x_labels = [5,7,9,11,13,15,17,19,21]
+    y_labels = [3,4,5,6,7,8,9]
+    ax1.set_xticks(np.arange(len(x_labels)))
+    ax1.set_yticks(np.arange(len(y_labels)))
+    ax1.set_xticklabels(x_labels, fontsize=ticks_fontsize)
+    ax1.set_yticklabels(y_labels, fontsize=ticks_fontsize)
+
+    ax1.set_ylabel('$w_{len1}$', fontsize=axis_labels_fontsize)
+    ax1.set_xlabel('$w_{len2}$', fontsize=axis_labels_fontsize)
+
+    for i in range(ref_error_abs.shape[0]):
+        for j in range(ref_error_abs.shape[1]):
+            text = ax1.text(j, i, round(ref_error_abs[i, j], 3),
+                        ha="center", va="center", color="w", fontsize=annot_fontsize)
+
+    ref_error_cut = abs(ref_error[2:4, 1:6])
+    im = ax2.imshow(ref_error_cut, cmap='viridis_r', vmin=0.085, vmax=0.1)
+
+    cbar = ax2.figure.colorbar(im, ax=ax2)
+
+    x_labels = [7,9,11,13,15]
+    y_labels = [5, 6]
+    ax2.set_xticks(np.arange(len(x_labels)))
+    ax2.set_yticks(np.arange(len(y_labels)))
+    ax2.set_xticklabels(x_labels, fontsize=ticks_fontsize)
+    ax2.set_yticklabels(y_labels, fontsize=ticks_fontsize)
+
+    ax2.set_ylabel('$w_{len1}$', fontsize=axis_labels_fontsize)
+    ax2.set_xlabel('$w_{len2}$', fontsize=axis_labels_fontsize)
+
+    for i in range(ref_error_cut.shape[0]):
+        for j in range(ref_error_cut.shape[1]):
+            if i == 1 and j == 1:
+                text = ax2.text(j, i, round(ref_error_cut[i, j], 5), ha="center", va="center", color="w", weight='bold', fontsize=annot_fontsize_bold)
+            else:
+                text = ax2.text(j, i, round(ref_error_cut[i, j], 5), ha="center", va="center", color="w", fontsize=annot_fontsize)
+
+    plt.tight_layout()
+
+    plt.savefig('event_detection_window_search.png', dpi=600)
+
 if __name__ == '__main__':
-    plot_reduced_raw_event_joint_test_accuracies_vs_no_of_6_mers()
+    # plot_reduced_raw_event_joint_test_accuracies_vs_no_of_6_mers()
     # plot_num_basic_6_mers_vs_all_appearing_6_mers()
     # plot_rnns_comparison()
     # plot_attention_weights()
+    plot_event_detection_window_search()
