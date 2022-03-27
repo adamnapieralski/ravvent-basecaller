@@ -5,7 +5,7 @@ import tensorflow_addons as tfa
 import utils
 
 class Encoder(tf.keras.Model):
-  def __init__(self, enc_units, batch_sz, layer_depth, inputs_features_num):
+  def __init__(self, enc_units, batch_sz, layer_depth, inputs_features_num, rnn_type='bilstm'):
     super(Encoder, self).__init__()
     self.batch_sz = batch_sz
     self.enc_units = enc_units
@@ -13,16 +13,37 @@ class Encoder(tf.keras.Model):
     self.layer_depth = layer_depth
     self.inputs_features_num = inputs_features_num
 
-    self.bidir_layers = [
-        tf.keras.layers.Bidirectional(
+    self.rnn_type = rnn_type
+
+    if 'bi' in self.rnn_type:
+        self.rnn_layers = [
+            tf.keras.layers.Bidirectional(
+                tf.keras.layers.RNN(
+                    tf.keras.layers.LSTMCell(
+                        enc_units, kernel_initializer='glorot_uniform',
+                    )
+                    if 'lstm' in self.rnn_type else
+                    tf.keras.layers.GRUCell(
+                        enc_units, kernel_initializer='glorot_uniform',
+                    ),
+                    return_sequences=True, return_state=True,
+                )
+            ) for _ in range(self.layer_depth)
+        ]
+    else:
+        self.rnn_layers = [
             tf.keras.layers.RNN(
                 tf.keras.layers.LSTMCell(
                     enc_units, kernel_initializer='glorot_uniform',
-                ),
+                )
+                  if 'lstm' in self.rnn_type else
+                    tf.keras.layers.GRUCell(
+                        enc_units, kernel_initializer='glorot_uniform',
+                    ),
                 return_sequences=True, return_state=True,
             )
-        ) for _ in range(self.layer_depth)
-    ]
+            for _ in range(self.layer_depth)
+        ]
 
   def call(self, inputs, training=False, mask=None):
     inputs.set_shape((None, None, self.inputs_features_num))
@@ -32,7 +53,7 @@ class Encoder(tf.keras.Model):
         kwargs = {'initial_state': states, 'training': training}
         if mask is not None:
             kwargs['mask'] = mask
-        result = self.bidir_layers[i](output, **kwargs)
+        result = self.rnn_layers[i](output, **kwargs)
         output, states = result[0], result[1:]
 
     return output, states
@@ -40,13 +61,14 @@ class Encoder(tf.keras.Model):
 
 
 class Decoder(tf.keras.Model):
-  def __init__(self, vocab_size, layer_depth, dec_units, batch_sz, max_input_len, attention_type='luong', teacher_forcing=True):
+  def __init__(self, vocab_size, layer_depth, dec_units, batch_sz, max_input_len, attention_type='luong', teacher_forcing=True, rnn_type='lstm'):
     super(Decoder, self).__init__()
     self.batch_sz = batch_sz
     self.dec_units = dec_units
     self.attention_type = attention_type
 
     self.max_input_len = max_input_len
+    self.rnn_type = rnn_type
 
     if teacher_forcing is False:
         self.teacher_forcing = 1.
@@ -60,7 +82,11 @@ class Decoder(tf.keras.Model):
     # Embedding Layer
     self.embedding = lambda ids: tf.one_hot(ids, depth=self.vocab_size)
 
-    cells = [tf.keras.layers.LSTMCell(dec_units, kernel_initializer='glorot_uniform') for _ in range(self.layer_depth)]
+    cells = [
+        tf.keras.layers.LSTMCell(dec_units, kernel_initializer='glorot_uniform')
+          if 'lstm' in self.rnn_type else
+            tf.keras.layers.GRUCell(dec_units, kernel_initializer='glorot_uniform')
+        for _ in range(self.layer_depth)]
 
     self.decoder_rnn_cell = tf.keras.layers.StackedRNNCells(cells)
 
@@ -144,8 +170,10 @@ class Basecaller(tf.keras.Model):
         super().__init__()
         # Build the encoder and decoder
         self.batch_sz = batch_sz
-        self.encoder_raw = Encoder(enc_units, batch_sz, encoder_depth, 1)
-        self.encoder_event = Encoder(enc_units, batch_sz, encoder_depth, 5)
+        self.rnn_type = rnn_type
+
+        self.encoder_raw = Encoder(enc_units, batch_sz, encoder_depth, 1, self.rnn_type)
+        self.encoder_event = Encoder(enc_units, batch_sz, encoder_depth, 5, self.rnn_type)
 
         self.tokenizer = tokenizer
 
@@ -164,12 +192,12 @@ class Basecaller(tf.keras.Model):
             batch_sz=batch_sz,
             max_input_len=self.max_input_len,
             attention_type='luong',
-            teacher_forcing=self.teacher_forcing
+            teacher_forcing=self.teacher_forcing,
+            rnn_type=self.rnn_type.replace('bi', '')
         )
 
         self.input_data_type = input_data_type
         self.input_padding_value = input_padding_value
-        self.rnn_type = rnn_type
         self.attention_type = attention_type
         self.beam_width = beam_width
 
