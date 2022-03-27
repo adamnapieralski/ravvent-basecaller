@@ -147,6 +147,20 @@ class MappingEvaluator():
 
         return match_score, match_score_with_invalid, invalid_fraction
 
+    def analyse_and_select_best_results(self, results_dir, data_type):
+        results_dir = Path(results_dir)
+        results_paths = [p for p in results_dir.iterdir() if data_type in str(p)]
+        results_paths.sort()
+
+        scores = []
+        for res_path in results_paths:
+            match_score, match_score_with_invalid, invalid_fraction = self.compute_total_results(res_path)
+            scores.append(match_score_with_invalid)
+            print(res_path.stem)
+            print(match_score, match_score_with_invalid, invalid_fraction)
+
+        print(f'Best score: {np.max(scores)} of {results_paths[np.argmax(scores)].stem}')
+
     def add_ref_length_to_results(self, results_path):
         results = []
         with open(results_path, 'rt') as f:
