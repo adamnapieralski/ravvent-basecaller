@@ -7,9 +7,49 @@ from pathlib import Path
 # import analysis_utils as au
 import pickle
 import event_detection.event_detector as ed
+import ravvent_mapping_evaluator as rme
 # from data_loader import DataModule
 # from basecaller import Basecaller
 # import utils
+
+def plot_raw_data():
+    raw_id_min = 5000
+    raw_id_max = 5400
+
+    raw = np.loadtxt('data/chiron/ecoli/train/ecoli_0001.signal')
+    labels = np.loadtxt('data/chiron/ecoli/train/ecoli_0001.label', dtype=object)
+    range_ids = labels[:,:2].astype(int)
+    nucs = labels[:, 2]
+    fig, ax = plt.subplots(figsize=(15,4))
+    ax.set_xlim([0, raw_id_max - raw_id_min])
+    ax.set_xlabel('Signal ID')
+    ax.set_ylabel('Current value [pA]')
+    fig.tight_layout()
+
+    raw = raw[raw_id_min:raw_id_max]
+    ax.plot(raw)
+
+    plt.savefig('figures/raw_data.png', dpi=300)
+
+    id_start = np.argmax(range_ids[:,0] >= raw_id_min)
+    id_end = np.argmax(np.logical_not(range_ids[:,0] < raw_id_max))
+
+    split_ids = range_ids[id_start:id_end, 0]
+    split_ids -= split_ids[0]
+
+    nucs = nucs[id_start:id_end]
+
+    for i, div in enumerate(split_ids):
+        color = 'olive'
+        ax.axvline(x=div, color=color)
+
+        next_div = raw_id_max - raw_id_min if i == len(split_ids) - 1 else split_ids[i+1]
+
+        symbol_x_pos = (div + next_div) / 2 - 1.5
+        plt.text(symbol_x_pos, 220, nucs[i], transform=ax.transData)
+
+    plt.savefig('figures/raw_data_marked.png', dpi=300)
+
 
 def plot_reduced_raw_event_joint_test_accuracies_vs_no_of_6_mers():
     nums = [x / 4096 for x in [45, 450, 1024, 2048, 4096]]
@@ -72,9 +112,9 @@ def plot_num_basic_6_mers_vs_all_appearing_6_mers():
 
 def plot_rnns_comparison():
     # gru, lstm, bigru, bilstm
-    raw_accs = [0.6167816019985375, 0.6338807466942893, 0.6384401330306355, 0.6722500736512388]
-    events_accs = [0.5328741160783943, 0.5431880844269427, 0.5785425703314027, 0.5797833170351909]
-    joint_accs = [0.5452239584748999, 0.5334056789666597, 0.6071774475674491, 0.6288333857969358]
+    raw_accs = [0.8328752793495316, 0.8635220155922815, 0.9511955405603638, 0.9600662450181092]
+    events_accs = [0.8095958504430516, 0.7980063058130534, 0.8652750877327555, 0.8480069291098759]
+    joint_accs = [0.8145401713272199, 0.8726543102950517, 0.908816120906801, 0.9598024069354378]
 
     accs = [events_accs, raw_accs, joint_accs]
     gru_accs = [a[0] for a in accs]
@@ -94,7 +134,7 @@ def plot_rnns_comparison():
     rects_bilstm = ax.bar(x + 1.5 * width, bilstm_accs, width, label='BiLSTM')
 
     # Add some text for labels, title and custom x-axis tick labels, etc.
-    ax.set_ylabel('Accuracy scores')
+    ax.set_ylabel('Accuracy score')
     ax.set_xlabel('Input data type')
 
     # ax.set_title('Comparison of accuracies of RNN types')
@@ -110,7 +150,7 @@ def plot_rnns_comparison():
     fig.tight_layout()
 
     # plt.show()
-    plt.savefig('rnns_comparison.png', dpi=300)
+    plt.savefig('figures/rnns_comparison.png', dpi=300)
 
 def plot_attention_weights():
     # # model_path = 'models/simulator.reduced/model.1.joint.bilstm.u128.simulator.rawmax200.evmax30.b128.ep100.pat100.tf0.emb5.ed1.bahdanau.reduced.seq.4096.600000.4096.81/model_chp'
@@ -284,10 +324,85 @@ def plot_event_detection():
     plt.savefig('event_detection.png', dpi=600)
 
 
+def plot_learning_curves():
+    me = rme.MappingEvaluator()
+
+    results_path = Path('info/snippets/mapping_evaluations')
+
+    event_res_map = [p for p in results_path.iterdir() if re.match(r'.*event\.\d\d\.json$', str(p))]
+    event_res_map.sort()
+    event_res_map = np.array([me.compute_total_results(str(p)) for p in event_res_map])
+
+    joint_res_map = [p for p in results_path.iterdir() if re.match(r'.*joint\.\d\d\.json$', str(p))]
+    joint_res_map.sort()
+    joint_res_map = np.array([me.compute_total_results(str(p)) for p in joint_res_map])
+
+    raw_res_map = [p for p in results_path.iterdir() if re.match(r'.*raw\.\d\d\.json$', str(p))]
+    raw_res_map.sort()
+    raw_res_map = np.array([me.compute_total_results(str(p)) for p in raw_res_map])
+
+    event_log_path = Path('info/snippets/csvlog.1.event.lambda.mask.pad.lr0.0001.bilstm.encu128.encd2.decu128.decd1.b128.luong.tf0.5.strd6.spe10000.spv1500.log')
+    joint_log_path = Path('info/snippets/csvlog.1.joint.lambda.mask.pad.lr0.0001.bilstm.encu128.encd2.decu128.decd1.b128.luong.tf0.5.strd6.spe10000.spv1500.log')
+    raw_log_path = Path('info/snippets/csvlog.1.raw.lambda.mask.pad.lr0.0001.bilstm.encu128.encd2.decu128.decd1.b128.luong.tf0.5.strd6.spe10000.spv1500.log')
+
+    event_logs = np.loadtxt(event_log_path, dtype=object, delimiter=',')[1:,1:].astype('float')
+    joint_logs = np.loadtxt(joint_log_path, dtype=object, delimiter=',')[1:,1:].astype('float')
+    raw_logs = np.loadtxt(raw_log_path, dtype=object, delimiter=',')[1:,1:].astype('float')
+
+    data = {
+        'joint': {
+            'log_acc': joint_logs[:, 0],
+            'log_val_acc': joint_logs[:, 2],
+            'log_loss': joint_logs[:, 1],
+            'log_val_loss': joint_logs[:, 3],
+            'map_acc': joint_res_map[:,0] / 100
+        },
+        'raw': {
+            'log_acc': raw_logs[:, 0],
+            'log_val_acc': raw_logs[:, 2],
+            'log_loss': raw_logs[:, 1],
+            'log_val_loss': raw_logs[:, 3],
+            'map_acc': raw_res_map[:,0] / 100
+        },
+        'event': {
+            'log_acc': event_logs[:, 0],
+            'log_val_acc': event_logs[:, 2],
+            'log_loss': event_logs[:, 1],
+            'log_val_loss': event_logs[:, 3],
+            'map_acc': event_res_map[:,0] / 100
+        }
+    }
+
+    for data_type in ['joint', 'raw', 'event']:
+        fig, ax_loss = plt.subplots(figsize=(6.4, 4))
+        ax_acc = ax_loss.twinx()
+
+        log_loss, = ax_loss.plot(data[data_type]['log_loss'], 'r', linewidth=1, label='train loss')
+        # log_val_loss, = ax_loss.plot(data[data_type]['log_val_loss'], 'b--', linewidth=1, label='val. loss')
+
+        # log_acc, = ax_acc.plot(data[data_type]['log_acc'], 'r', linewidth=1, label='train acc.')
+        log_val_acc, = ax_acc.plot(data[data_type]['log_val_acc'], 'b', linewidth=1, label='val. subset acc.')
+
+        map_acc, = ax_acc.plot(data[data_type]['map_acc'], color='g', linewidth=1.5, label='val. read acc.')
+
+        ax_acc.set_ylim((0, 1))
+        # ax_acc.set_xlim((0, 40))
+        ax_loss.set_xlabel('Epoch number')
+        ax_acc.set_ylabel('Accuracy')
+        ax_loss.set_ylabel('Loss')
+
+        ax_acc.legend(handles=[log_loss, log_val_acc, map_acc], loc='lower right', framealpha=0.5)
+
+        fig.tight_layout()
+        plt.savefig(f'figures/learning_curve_{data_type}.png', dpi=600)
+
+
 if __name__ == '__main__':
+    # plot_raw_data()
     # plot_reduced_raw_event_joint_test_accuracies_vs_no_of_6_mers()
     # plot_num_basic_6_mers_vs_all_appearing_6_mers()
     # plot_rnns_comparison()
     # plot_attention_weights()
-    plot_event_detection_window_search()
-    plot_event_detection()
+    # plot_event_detection_window_search()
+    # plot_event_detection()
+    plot_learning_curves()

@@ -1,0 +1,147 @@
+{
+  "(1, 1)": {
+    "raw": {
+      "id": 36,
+      "path": "",
+      "results": [
+        0,
+        0,
+        0
+      ]
+    },
+    "joint": {
+      "id": 33,
+      "path": "",
+      "results": [
+        0,
+        0,
+        0
+      ]
+    },
+    "event": {
+      "id": 39,
+      "path": "",
+      "results": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "(2, 1)": {
+    "raw": {
+      "id": 37,
+      "path": "info/snippets/mapping_evaluations/encd_2_decd_1/test/old/mapping_evaluator_results.snippets.test.raw.40.ecoli.beam1.json",
+      "results": [
+        80.929,
+        84.083,
+        3.715
+      ]
+    },
+    "joint": {
+      "id": 40,
+      "path": "info/snippets/mapping_evaluations/encd_2_decd_1/test/old/mapping_evaluator_results.snippets.test.joint.40.ecoli.beam1.json",
+      "results": [
+        81.146,
+        84.335,
+        3.715
+      ]
+    },
+    "event": {
+      "id": 39,
+      "path": "info/snippets/mapping_evaluations/encd_2_decd_1/test/old/mapping_evaluator_results.snippets.test.event.36.ecoli.beam1.json",
+      "results": [
+        69.74,
+        73.083,
+        6.781
+      ]
+    }
+  },
+  "(2, 2)": {
+    "raw": {
+      "id": 36,
+      "path": "info/snippets/mapping_evaluations/encd_2_decd_2/test/mapping_evaluator_results.snippets.test.raw.37.ecoli.beam1.json",
+      "results": [
+        80.599,
+        83.494,
+        3.538
+      ]
+    },
+    "joint": {
+      "id": 40,
+      "path": "info/snippets/mapping_evaluations/encd_2_decd_2/test/mapping_evaluator_results.snippets.test.joint.40.ecoli.beam1.json",
+      "results": [
+        80.237,
+        83.604,
+        4.127
+      ]
+    },
+    "event": {
+      "id": 39,
+      "path": "info/snippets/mapping_evaluations/encd_2_decd_2/test/mapping_evaluator_results.snippets.test.event.39.ecoli.beam1.json",
+      "results": [
+        69.006,
+        72.682,
+        7.724
+      ]
+    }
+  },
+  "(3, 1)": {
+    "raw": {
+      "id": 37,
+      "path": "info/snippets/mapping_evaluations/encd_3_decd_1/test/mapping_evaluator_results.snippets.test.raw.37.ecoli.beam1.json",
+      "results": [
+        83.217,
+        84.336,
+        1.474
+      ]
+    },
+    "joint": {
+      "id": 40,
+      "path": "info/snippets/mapping_evaluations/encd_3_decd_1/test/mapping_evaluator_results.snippets.test.joint.40.ecoli.beam1.json",
+      "results": [
+        81.229,
+        84.829,
+        4.245
+      ]
+    },
+    "event": {
+      "id": 38,
+      "path": "info/snippets/mapping_evaluations/encd_3_decd_1/test/mapping_evaluator_results.snippets.test.event.38.ecoli.beam1.json",
+      "results": [
+        70.984,
+        73.984,
+        5.778
+      ]
+    }
+  },
+  "(3, 2)": {
+    "raw": {
+      "id": 36,
+      "path": "info/snippets/mapping_evaluations/encd_3_decd_2/test/mapping_evaluator_results.snippets.test.raw.36.ecoli.beam1.fixed.json",
+      "results": [
+        83.712,
+        84.081,
+        0.649
+      ]
+    },
+    "joint": {
+      "id": 40,
+      "path": "info/snippets/mapping_evaluations/encd_3_decd_2/test/mapping_evaluator_results.snippets.test.joint.40.ecoli.beam1.fixed.json",
+      "results": [
+        83.151,
+        83.539,
+        0.708
+      ]
+    },
+    "event": {
+      "id": 39,
+      "path": "info/snippets/mapping_evaluations/encd_3_decd_2/test/mapping_evaluator_results.snippets.test.event.39.ecoli.beam1.fixed.json",
+      "results": [
+        72.886,
+        73.596,
+        3.479
+      ]
+    }
+  }
+}

@@ -4,6 +4,8 @@ from timeit import default_timer as timer
 import data_loader as dl
 from basecaller import Basecaller
 
+from memory_profiler import profile
+
 RANDOM_SEED = 22
 
 def run():
@@ -44,7 +46,7 @@ def run():
         decoder_depth=decoder_depth,
         rnn_type=rnn_type,
         attention_type=attention_type,
-        teacher_forcing=teacher_forcing
+        teacher_forcing=teacher_forcing,
     )
 
     # Configure the loss and optimizer
@@ -52,11 +54,11 @@ def run():
         optimizer=tf.optimizers.Adam(learning_rate=learning_rate, clipnorm=1.),
     )
 
-    # load_checkpoint = 'models/snippets/model.1.joint.lambda.no_mask.pad.lr0.0001.bilstm.encu128.encd2.decu128.decd1.b128.luong.tf0.5.strd6.spe10000.spv1500.30/model_chp'
+    # load_checkpoint = 'models/snippets/mask/encd_2_decd_2/model.3.event.lambda.mask.pad.lr0.0001.bilstm.encu128.encd2.decu128.decd2.b128.luong.tf0.5.strd6.spe10000.spv1500.08/model_chp'
     # print(f'Loading weights: {load_checkpoint}')
     # basecaller.load_weights(load_checkpoint)
 
-    checkpoint_filepath = f'models/snippets/mask/model.1.{name}.{"{epoch:02d}"}/model_chp'
+    checkpoint_filepath = f'models/snippets/mask/encd_{encoder_depth}_decd_{decoder_depth}/model.1.{name}.{"{epoch:02d}"}/model_chp'
     print('New checkpoints:', checkpoint_filepath)
 
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
@@ -68,18 +70,22 @@ def run():
     )
 
     csv_logger = tf.keras.callbacks.CSVLogger(
-        f'info/snippets/csvlog.1.{name}.log', append=False
+        f'info/csvlog.test.{name}.log', append=False
     )
 
-    hist = basecaller.fit(
-        dg_train,
-        epochs=epochs,
-        callbacks=[model_checkpoint_callback, csv_logger],
-        validation_data=dg_val,
-        steps_per_epoch=steps_per_epoch,
-        validation_steps=validation_steps,
-        shuffle=False
-    )
+    @profile
+    def train():
+        hist = basecaller.fit(
+            dg_train,
+            epochs=epochs,
+            # callbacks=[model_checkpoint_callback, csv_logger],
+            validation_data=dg_val,
+            steps_per_epoch=steps_per_epoch,
+            validation_steps=validation_steps,
+            shuffle=False
+        )
+
+    train()
 
 if __name__ == '__main__':
     run()

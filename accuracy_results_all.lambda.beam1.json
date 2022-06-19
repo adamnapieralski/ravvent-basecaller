@@ -1,0 +1,147 @@
+{
+  "(1, 1)": {
+    "raw": {
+      "id": 36,
+      "path": "info/snippets/mapping_evaluations/encd_1_decd_1/test/mapping_evaluator_results.snippets.test.mask.raw.encu128.encd1.decu128.decd1.36.beam1.json",
+      "results": [
+        79.549,
+        81.791,
+        4.871
+      ]
+    },
+    "joint": {
+      "id": 33,
+      "path": "info/snippets/mapping_evaluations/encd_1_decd_1/test/mapping_evaluator_results.snippets.test.mask.joint.encu128.encd1.decu128.decd1.33.beam1.json",
+      "results": [
+        79.892,
+        82.253,
+        5.223
+      ]
+    },
+    "event": {
+      "id": 39,
+      "path": "info/snippets/mapping_evaluations/encd_1_decd_1/test/mapping_evaluator_results.snippets.test.mask.event.encu128.encd1.decu128.decd1.39.beam1.json",
+      "results": [
+        63.831,
+        70.996,
+        25.469
+      ]
+    }
+  },
+  "(2, 1)": {
+    "raw": {
+      "id": 37,
+      "path": "info/snippets/mapping_evaluations/encd_2_decd_1/test/mapping_evaluator_results.snippets.test.mask.raw.encu128.encd2.decu128.decd1.37.beam1.json",
+      "results": [
+        83.315,
+        85.156,
+        3.404
+      ]
+    },
+    "joint": {
+      "id": 40,
+      "path": "info/snippets/mapping_evaluations/encd_2_decd_1/test/mapping_evaluator_results.snippets.test.mask.joint.encu128.encd2.decu128.decd1.40.beam1.json",
+      "results": [
+        83.569,
+        85.527,
+        4.108
+      ]
+    },
+    "event": {
+      "id": 39,
+      "path": "info/snippets/mapping_evaluations/encd_2_decd_1/test/mapping_evaluator_results.snippets.test.mask.event.encu128.encd2.decu128.decd1.39.beam1.json",
+      "results": [
+        69.777,
+        73.988,
+        15.2
+      ]
+    }
+  },
+  "(2, 2)": {
+    "raw": {
+      "id": 36,
+      "path": "info/snippets/mapping_evaluations/encd_2_decd_2/test/mapping_evaluator_results.snippets.test.raw.36.beam1.json",
+      "results": [
+        84.638,
+        85.885,
+        2.641
+      ]
+    },
+    "joint": {
+      "id": 40,
+      "path": "info/snippets/mapping_evaluations/encd_2_decd_2/test/mapping_evaluator_results.snippets.test.joint.40.beam1.json",
+      "results": [
+        84.105,
+        86.085,
+        3.756
+      ]
+    },
+    "event": {
+      "id": 39,
+      "path": "info/snippets/mapping_evaluations/encd_2_decd_2/test/mapping_evaluator_results.snippets.test.event.39.beam1.json",
+      "results": [
+        70.441,
+        74.21,
+        14.437
+      ]
+    }
+  },
+  "(3, 1)": {
+    "raw": {
+      "id": 37,
+      "path": "info/snippets/mapping_evaluations/encd_3_decd_1/test/mapping_evaluator_results.snippets.test.raw.37.beam1.json",
+      "results": [
+        85.63,
+        86.697,
+        2.171
+      ]
+    },
+    "joint": {
+      "id": 40,
+      "path": "info/snippets/mapping_evaluations/encd_3_decd_1/test/mapping_evaluator_results.snippets.test.joint.40.beam1.json",
+      "results": [
+        85.133,
+        87.226,
+        3.345
+      ]
+    },
+    "event": {
+      "id": 38,
+      "path": "info/snippets/mapping_evaluations/encd_3_decd_1/test/mapping_evaluator_results.snippets.test.event.38.beam1.json",
+      "results": [
+        73.373,
+        75.871,
+        9.272
+      ]
+    }
+  },
+  "(3, 2)": {
+    "raw": {
+      "id": 36,
+      "path": "info/snippets/mapping_evaluations/encd_3_decd_2/test/mapping_evaluator_results.snippets.test.raw.36.beam1.fixed.json",
+      "results": [
+        86.762,
+        87.276,
+        1.467
+      ]
+    },
+    "joint": {
+      "id": 40,
+      "path": "info/snippets/mapping_evaluations/encd_3_decd_2/test/mapping_evaluator_results.snippets.test.joint.40.beam1.fixed.json",
+      "results": [
+        86.497,
+        87.266,
+        2.054
+      ]
+    },
+    "event": {
+      "id": 39,
+      "path": "info/snippets/mapping_evaluations/encd_3_decd_2/test/mapping_evaluator_results.snippets.test.event.39.beam1.fixed.json",
+      "results": [
+        75.029,
+        76.525,
+        8.451
+      ]
+    }
+  }
+}
