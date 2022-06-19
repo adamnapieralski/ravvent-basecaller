@@ -113,13 +113,20 @@ class RavventPerformanceEvaluator():
         with open(results_path, 'rt') as f:
             results = json.load(f)
 
+        bases_speeds = []
+        signals_speeds = []
+
         for res in results:
             bases_num += res['bases_num']
             samples_num += res['samples_num']
             t_total += res['total']
             t_processing += res['total_processing']
 
+            bases_speeds.append(bases_num / t_processing)
+            signals_speeds.append(samples_num / t_processing)
 
+
+        return np.mean(bases_speeds), np.std(signals_speeds), np.mean(signals_speeds), np.std(signals_speeds)
 
         return bases_num / t_total, bases_num / t_processing, samples_num / t_total, samples_num / t_processing
 
@@ -151,23 +158,34 @@ if __name__ == '__main__':
         'event': 'models/snippets/model.1.event.lambda.no_mask.pad.lr0.0001.bilstm.encu128.encd2.decu128.decd1.b128.luong.tf0.5.strd6.spe10000.spv1500.36/model_chp'}
 
 
-    data_type = 'joint'
-    mode = 'cpu'
-    weights_path = weights_paths[data_type]
+    # data_type = 'joint'
+    # mode = 'cpu'
+    # weights_path = weights_paths[data_type]
 
-    rpe.evaluate_specific(
-        files_info_path, f'info/snippets/perform.{data_type}.{mode}.beam5.json', weights_path, data_type)
+    # rpe.evaluate_specific(
+    #     files_info_path, f'info/snippets/perform.{data_type}.{mode}.beam5.json', weights_path, data_type)
 
-    data_type = 'raw'
-    mode = 'cpu'
-    weights_path = weights_paths[data_type]
+    # data_type = 'raw'
+    # mode = 'cpu'
+    # weights_path = weights_paths[data_type]
 
-    rpe.evaluate_specific(
-        files_info_path, f'info/snippets/perform.{data_type}.{mode}.beam5.json', weights_path, data_type)
+    # rpe.evaluate_specific(
+    #     files_info_path, f'info/snippets/perform.{data_type}.{mode}.beam5.json', weights_path, data_type)
 
-    data_type = 'event'
-    mode = 'cpu'
-    weights_path = weights_paths[data_type]
-    rpe.evaluate_specific(
-        files_info_path, f'info/snippets/perform.{data_type}.{mode}.beam5.json', weights_path, data_type)
+    # data_type = 'event'
+    # mode = 'cpu'
+    # weights_path = weights_paths[data_type]
+    # rpe.evaluate_specific(
+    #     files_info_path, f'info/snippets/perform.{data_type}.{mode}.beam5.json', weights_path, data_type)
+
+
+    for d_type in ['event', 'raw', 'joint']:
+        for comp in ['cpu', 'gpu']:
+            res_1 = rpe.compute_total_results(f'info/snippets/performance/encd_3_decd_2/perform.{d_type}.{comp}1.encd3.decd2.beam1.json')
+            # res_2 = rpe.compute_total_results(f'info/snippets/performance/encd_3_decd_2/perform.{d_type}.{comp}2.encd3.decd2.beam1.json')
+            print(f'{d_type} - {comp}')
+            print(res_1)
+            print()
+            # print(f'{d_type} - {comp}: {round(np.mean([res_1[1], res_2[1]]), 0)}+-{round(np.std([res_1[1], res_2[1]]), 0)}\t\t{round(np.mean([res_1[3], res_2[3]]), 0)}+-{round(np.std([res_1[3], res_2[3]]), 0)}')
+            # print(f'{d_type} - {comp}: {round(np.mean([res_1[1], res_2[1]]), 0)}+-{round(np.std([res_1[1], res_2[1]]), 0)}\t\t{round(np.mean([res_1[3], res_2[3]]), 0)}+-{round(np.std([res_1[3], res_2[3]]), 0)}')
 

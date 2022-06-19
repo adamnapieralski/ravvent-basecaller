@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import tensorflow as tf
 import subprocess
@@ -6,20 +7,21 @@ import os
 from pathlib import Path
 
 import utils
-import merger
 import data_loader as dl
-import merger
-import basecaller as bc
+import merger_smooth
+import basecaller_multi as bc_multi
+import basecaller_old as bc_old
+
 import json
 
-BEAM_WIDTH = 5
-ENCODER_DEPTH = 1
-DECODER_DEPTH = 1
+BEAM_WIDTH = 1
+ENCODER_DEPTH = 3
+DECODER_DEPTH = 2
 
 class MappingEvaluator():
 
     def __init__(self, merger_scores_id=0):
-        self.merger = merger.Merger(scores_id=merger_scores_id)
+        self.merger = merger_smooth.Merger(scores_id=merger_scores_id)
         self.stride = 6
         self.basecaller = None
 
@@ -52,24 +54,27 @@ class MappingEvaluator():
             seqs = self.basecaller.tokens_to_nuc_sequences(pred_tokens)
 
             nuc_preds.extend([
-                merger.SeqLogitsPair(seq, list(sc[:len(seq)])) for seq, sc in zip(seqs, scores)])
+                merger_smooth.SeqLogitsPair(seq, list(sc[:len(seq)])) for seq, sc in zip(seqs, scores)])
 
-        merged_seq = self.merger.merge(nuc_preds).seq
+        print([s.seq for s in nuc_preds])
+        return {}
 
-        fasta_path = 'temp/ref.fasta'
-        fastq_path = 'temp/pred.fastq'
-        mapping_path = 'temp/mapping.paf'
-        self._create_fasta(ref_seq, fasta_path)
-        self._create_fastq(merged_seq, fastq_path)
-        self._run_minimap(fasta_path, fastq_path, mapping_path)
+        # merged_seq = self.merger.merge(nuc_preds).seq
 
-        ident = self._read_mapping_identity(mapping_path)
+        # fasta_path = 'temp_fix/ref.fasta'
+        # fastq_path = 'temp_fix/pred.fastq'
+        # mapping_path = 'temp_fix/mapping.paf'
+        # self._create_fasta(ref_seq, fasta_path)
+        # self._create_fastq(merged_seq, fastq_path)
+        # self._run_minimap(fasta_path, fastq_path, mapping_path)
+
+        # ident = self._read_mapping_identity(mapping_path)
 
         # os.remove(fasta_path)
         # os.remove(fastq_path)
         # os.remove(mapping_path)
 
-        return ident
+        # return ident
 
     def _create_fasta(self, seq, fname):
         with open(fname, 'wt') as f:
@@ -108,8 +113,22 @@ class MappingEvaluator():
         }
 
     def setup_basecaller(self, weights_path, data_type, mode=1):
-        if mode == 1:
-            self.basecaller = bc.Basecaller(
+        if mode == "old":
+            self.basecaller = bc_old.Basecaller(
+                enc_units=128,
+                dec_units=128,
+                batch_sz=128,
+                tokenizer=dl.nuc_tk,
+                input_data_type=data_type,
+                input_padding_value=dl.INPUT_PADDING,
+                encoder_depth=ENCODER_DEPTH,
+                decoder_depth=DECODER_DEPTH,
+                rnn_type='bilstm',
+                attention_type='luong',
+                teacher_forcing=0.5
+            )
+        elif mode == "multi":
+            self.basecaller = bc_multi.Basecaller(
                 enc_units=128,
                 dec_units=128,
                 batch_sz=128,
@@ -203,8 +222,6 @@ class MappingEvaluator():
     def evaluate_specific(self, data_type, ep_start, ep_end, eval_type='val'):
         for ep in [f'{i:02d}' for i in range(ep_start, ep_end + 1, 1)]:
             res = []
-            # with open(f'info/snippets/mapping_evaluations/mapping_evaluator_results.snippets.{data_type}.{ep}.json', 'rt') as f:
-            #     res = json.load(f)
 
             self.setup_basecaller(
                 f'models/snippets/mask/encd_{ENCODER_DEPTH}_decd_{DECODER_DEPTH}/model.1.{data_type}.lambda.mask.pad.lr0.0001.bilstm.encu128.encd{ENCODER_DEPTH}.decu128.decd{DECODER_DEPTH}.b128.luong.tf0.5.strd6.spe10000.spv1500.{ep}/model_chp',
@@ -237,32 +254,161 @@ class MappingEvaluator():
                     json.dump(res, f, indent=2)
 
 
-if __name__ == '__main__':
+    def fix_results(self, results_path):
+        if 'beam1' in str(results_path):
+            BEAM_WIDTH = 1
+        else:
+            BEAM_WIDTH = 5
+
+        if 'fixed' in str(results_path):
+            return
+
+        fixed_results_path = results_path.parent / f"{results_path.stem}.fixed.json"
+
+        with open(results_path, 'rt') as f:
+            old_results = json.load(f)
+
+        fixed_results = old_results
+
+        invalid_count = len([r for r in old_results if r['read_length'] == 0])
+        counter = 0
+
+        print(f"Fixing results: {str(results_path)}\nInvalid count: {invalid_count}\n")
+
+        for i, old_res in enumerate(old_results):
+            if old_res['read_length'] == 0:
+                counter += 1
+                ident_read = self.run(old_res['path'])
+                ident_read['path'] = old_res['path']
+                ident_read['ref_length'] = np.loadtxt(old_res['path'].replace('.signal', '.label'), dtype=object).shape[0]
+                print(ident_read)
+                fixed_results[i] = ident_read
+
+                # with open(fixed_results_path, 'wt') as f:
+                #     json.dump(fixed_results, f, indent=2)
+
+                print(f"{counter} / {invalid_count} ({str(results_path)})")
+
+                if counter >= 1:
+                    break
+
+
+
+test_results_meta = {
+    (3, 2): {
+        "raw": {
+            "id": 36,
+            "basecaller": "multi",
+        },
+        # "joint": {
+        #     "id": 40,
+        #     "basecaller": "multi",
+        # },
+        # "event": {
+        #     "id": 39,
+        #     "basecaller": "multi",
+        # },
+    },
+    # (3, 1): {
+    #     "raw": {
+    #         "id": 37,
+    #         "basecaller": "multi",
+    #     },
+    #     "joint": {
+    #         "id": 40,
+    #         "basecaller": "multi",
+    #     },
+    #     "event": {
+    #         "id": 38,
+    #         "basecaller": "multi",
+    #     },
+    # },
+    # (2, 2): {
+    #     "raw": {
+    #         "id": 36,
+    #         "basecaller": "old",
+    #     },
+    #     "joint": {
+    #         "id": 40,
+    #         "basecaller": "old",
+    #     },
+    #     "event": {
+    #         "id": 39,
+    #         "basecaller": "old",
+    #     },
+    # },
+    # (2, 1): {
+    #     "raw": {
+    #         "id": 37,
+    #         "basecaller": "old",
+    #     },
+    #     "joint": {
+    #         "id": 40,
+    #         "basecaller": "old",
+    #     },
+    #     "event": {
+    #         "id": 39,
+    #         "basecaller": "old",
+    #     },
+    # },
+    # (1, 1): {
+    #     "raw": {
+    #         "id": 36,
+    #         "basecaller": "old",
+    #     },
+    #     "joint": {
+    #         "id": 33,
+    #         "basecaller": "old",
+    #     },
+    #     "event": {
+    #         "id": 39,
+    #         "basecaller": "old",
+    #     },
+    # },
+}
+
+
+def fix_all():
     me = MappingEvaluator()
 
-    ENCODER_DEPTH = 2
-    DECODER_DEPTH = 2
+    for k, v in test_results_meta.items():
+        for d_type in v.keys():
+            ENCODER_DEPTH = k[0]
+            DECODER_DEPTH = k[1]
+            if k == (1,1) or k == (2,1):
+                test_results_meta[k][d_type]["path"] = f"info/snippets/mapping_evaluations/encd_{k[0]}_decd_{k[1]}/test/mapping_evaluator_results.snippets.test.mask.{d_type}.encu128.encd{k[0]}.decu128.decd{k[1]}.{test_results_meta[k][d_type]['id']}.beam{BEAM_WIDTH}.json"
+            else:
+                test_results_meta[k][d_type]["path"] = f"info/snippets/mapping_evaluations/encd_{k[0]}_decd_{k[1]}/test/mapping_evaluator_results.snippets.test.{d_type}.{test_results_meta[k][d_type]['id']}.beam{BEAM_WIDTH}.json"
 
-    BEAM_WIDTH = 1
-    me.evaluate_specific('joint', 40, 40, 'test')
-    me.evaluate_specific('raw', 37, 37, 'test')
-    me.evaluate_specific('event', 39, 39, 'test')
+            print(f"Setting up {test_results_meta[k][d_type]['basecaller']} basecaller: encd_{k[0]}_decd_{k[1]}/model.1.{d_type}.lambda.mask.pad.lr0.0001.bilstm.encu128.encd{k[0]}.decu128.decd{k[1]}.b128.luong.tf0.5.strd6.spe10000.spv1500.{test_results_meta[k][d_type]['id']}")
+            me.setup_basecaller(
+                f'models/snippets/mask/encd_{k[0]}_decd_{k[1]}/model.1.{d_type}.lambda.mask.pad.lr0.0001.bilstm.encu128.encd{k[0]}.decu128.decd{k[1]}.b128.luong.tf0.5.strd6.spe10000.spv1500.{test_results_meta[k][d_type]["id"]}/model_chp',
+                d_type,
+                mode=test_results_meta[k][d_type]["basecaller"]
+            )
 
-    # BEAM_WIDTH = 1
-    # me.evaluate_specific('joint', 40, 40, 'test')
-    # me.evaluate_specific('raw', 37, 37, 'test')
-    # me.evaluate_specific('event', 39, 39, 'test')
+            me.fix_results(Path(test_results_meta[k][d_type]["path"]))
+
+if __name__ == '__main__':
+
+    fix_all()
+    # me = MappingEvaluator()
+
+    # me.setup_basecaller('models/snippets/mask/encd_3_decd_2/model.1.joint.lambda.mask.pad.lr0.0001.bilstm.encu128.encd3.decu128.decd2.b128.luong.tf0.5.strd6.spe10000.spv1500.36/model_chp', 'joint')
+
+    # with open('info/snippets/mapping_evaluations/encd_3_decd_2/test/mapping_evaluator_results.snippets.test.joint.36.ecoli.beam5.json', 'rt') as f:
+    #     old_results = json.load(f)
+
+    # fixed_results = []
+    # for old_res in old_results:
+    #     if old_res['read_length'] == 0:
+    #         ident_read = me.run(old_res['path'])
+    #         ident_read['path'] = old_res['path']
+    #         ident_read['ref_length'] = np.loadtxt(old_res['path'].replace('.signal', '.label'), dtype=object).shape[0]
+    #         print(ident_read)
+    #         fixed_results.append(ident_read)
+
+    #         with open('fixed.encd_3_decd_2.test.joint.36.ecoli.beam5.json', 'wt') as f:
+    #             json.dump(fixed_results, f, indent=2)
 
 
-    # ENCODER_DEPTH = 1
-    # DECODER_DEPTH = 1
-
-    # BEAM_WIDTH = 5
-    # me.evaluate_specific('joint', 33, 33, 'test')
-    # me.evaluate_specific('raw', 36, 36, 'test')
-    # me.evaluate_specific('event', 39, 39, 'test')
-
-    # BEAM_WIDTH = 1
-    # me.evaluate_specific('joint', 33, 33, 'test')
-    # me.evaluate_specific('raw', 36, 36, 'test')
-    # me.evaluate_specific('event', 39, 39, 'test')
